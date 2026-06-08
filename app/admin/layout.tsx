@@ -12,6 +12,7 @@ const navItems = [
   { label: 'Payroll', href: '/admin/payroll', icon: 'ti-currency-rupee' },
   { label: 'Reports', href: '/admin/reports', icon: 'ti-file-analytics' },
   { label: 'Screenshots', href: '/admin/screenshots', icon: 'ti-screenshot' },
+  { label: 'Settings', href: '/admin/settings', icon: 'ti-settings' },
 ]
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
