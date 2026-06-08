@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   const { data: existing } = await supabase
     .from("attendance")
     .select("*")
