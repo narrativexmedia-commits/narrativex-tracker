@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   const { data: existing } = await supabase
     .from("attendance")
     .select("*")
@@ -57,7 +57,8 @@ export async function POST(req: NextRequest) {
   if (existing) return NextResponse.json({ error: "Already clocked in today" }, { status: 400 });
 
   const now = new Date();
-  const isLate = now.getHours() > 9 || (now.getHours() === 9 && now.getMinutes() > 30);
+  const istTime = new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
+  const isLate = istTime > "09:30";
 
   const { error } = await supabase.from("attendance").insert({
     employee_id: employee.id,

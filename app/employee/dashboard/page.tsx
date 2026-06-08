@@ -28,7 +28,7 @@ export default function EmployeeDashboard() {
     if (!emp) { router.push("/"); return; }
     setEmployee(emp);
 
-    const today = new Date().toISOString().split("T")[0];
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
     const { data: att } = await supabase
       .from("attendance").select("*")
       .eq("employee_id", emp.id).eq("date", today).single();
