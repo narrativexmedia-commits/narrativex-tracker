@@ -57,8 +57,15 @@ export async function POST(req: NextRequest) {
   if (existing) return NextResponse.json({ error: "Already clocked in today" }, { status: 400 });
 
   const now = new Date();
-  const istTime = new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
-  const isLate = istTime > "09:30";
+  const { data: lateSettings } = await supabase
+  .from("settings")
+  .select("value")
+  .eq("key", "late_after")
+  .single();
+
+const lateAfter = lateSettings?.value ?? "09:30";
+const istTime = new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
+const isLate = istTime > lateAfter;
 
   const { error } = await supabase.from("attendance").insert({
     employee_id: employee.id,
