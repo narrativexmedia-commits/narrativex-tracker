@@ -16,7 +16,7 @@ type AttendanceRow = {
   clock_in: string | null;
   clock_out: string | null;
   ip_address: string | null;
-  status: 'present' | 'late' | 'absent';
+  status: 'present' | 'late' | 'absent' | 'cl';
   employee: { full_name: string; };
 };
 
@@ -25,7 +25,15 @@ type ManualForm = {
   date: string;
   clock_in: string;
   clock_out: string;
-  status: 'present' | 'late' | 'absent';
+  status: 'present' | 'late' | 'absent' | 'cl';
+};
+
+type EditForm = {
+  id: string;
+  clock_in: string;
+  clock_out: string;
+  status: 'present' | 'late' | 'absent' | 'cl';
+  date: string;
 };
 
 const PAGE_SIZE = 20;
@@ -44,15 +52,22 @@ function calcHours(clockIn: string | null, clockOut: string | null): string {
   return `${h}h ${m}m`;
 }
 
+function extractTime(ts: string | null): string {
+  if (!ts) return '';
+  return new Date(ts).toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }).replace('.', ':');
+}
+
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     present: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
     late: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
     absent: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+    cl: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
   };
+  const labels: Record<string, string> = { present: 'Present', late: 'Late', absent: 'Absent', cl: 'CL' };
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${styles[status] ?? 'bg-gray-100 text-gray-600'}`}>
-      {status}
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${styles[status] ?? 'bg-gray-100 text-gray-600'}`}>
+      {labels[status] ?? status}
     </span>
   );
 }
@@ -74,15 +89,20 @@ export default function AttendancePage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
 
-  // Filters
   const [filterDate, setFilterDate] = useState(today);
   const [filterEmployee, setFilterEmployee] = useState('');
 
-  // Modal
+  // Manual entry modal
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<ManualForm>(emptyForm());
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState('');
+
+  // Edit modal
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState<EditForm | null>(null);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState('');
 
   useEffect(() => {
     supabase.from('employees').select('id, full_name').eq('is_active', true).order('full_name')
@@ -120,16 +140,13 @@ export default function AttendancePage() {
     setModalError('');
     if (!form.employee_id) { setModalError('Select employee.'); return; }
     if (!form.date) { setModalError('Select date.'); return; }
-
     setSubmitting(true);
 
-    // Check existing record
     const { data: existing } = await supabase
       .from('attendance').select('id').eq('employee_id', form.employee_id).eq('date', form.date).single();
 
     if (existing) { setModalError('Record already exists for this employee on this date.'); setSubmitting(false); return; }
 
-    // Build timestamps from date + time inputs (IST)
     const toISO = (date: string, time: string) => {
       if (!time) return null;
       return new Date(`${date}T${time}:00+05:30`).toISOString();
@@ -150,6 +167,45 @@ export default function AttendancePage() {
     fetchAttendance();
   }
 
+  function openEditModal(row: AttendanceRow) {
+    setEditForm({
+      id: row.id,
+      date: row.date,
+      clock_in: extractTime(row.clock_in),
+      clock_out: extractTime(row.clock_out),
+      status: row.status,
+    });
+    setEditError('');
+    setShowEditModal(true);
+  }
+
+  function closeEditModal() { setShowEditModal(false); setEditForm(null); setEditError(''); }
+
+  async function handleEditSubmit() {
+    if (!editForm) return;
+    setEditError('');
+    setEditSubmitting(true);
+
+    const toISO = (date: string, time: string) => {
+      if (!time) return null;
+      return new Date(`${date}T${time}:00+05:30`).toISOString();
+    };
+
+    const { error } = await supabase
+      .from('attendance')
+      .update({
+        status: editForm.status,
+        clock_in: editForm.clock_in ? toISO(editForm.date, editForm.clock_in) : null,
+        clock_out: editForm.clock_out ? toISO(editForm.date, editForm.clock_out) : null,
+      })
+      .eq('id', editForm.id);
+
+    setEditSubmitting(false);
+    if (error) { setEditError(error.message); return; }
+    closeEditModal();
+    fetchAttendance();
+  }
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -160,10 +216,8 @@ export default function AttendancePage() {
             {totalCount} record{totalCount !== 1 ? 's' : ''} found
           </p>
         </div>
-        <button
-          onClick={openModal}
-          className="flex items-center gap-2 h-9 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors"
-        >
+        <button onClick={openModal}
+          className="flex items-center gap-2 h-9 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors">
           <i className="ti ti-plus text-base" />
           Manual Entry
         </button>
@@ -200,14 +254,14 @@ export default function AttendancePage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50">
-                {['Employee', 'Date', 'Clock In', 'Clock Out', 'Hours', 'Status'].map(h => (
-                  <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">{h}</th>
+                {['Employee', 'Date', 'Clock In', 'Clock Out', 'Hours', 'Status', ''].map((h, i) => (
+                  <th key={i} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
               {loading ? (
-                <tr><td colSpan={6} className="text-center py-12 text-gray-400 dark:text-gray-500">
+                <tr><td colSpan={7} className="text-center py-12 text-gray-400 dark:text-gray-500">
                   <div className="flex items-center justify-center gap-2">
                     <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -217,18 +271,26 @@ export default function AttendancePage() {
                   </div>
                 </td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={6} className="text-center py-12 text-gray-400 dark:text-gray-500">No records found</td></tr>
+                <tr><td colSpan={7} className="text-center py-12 text-gray-400 dark:text-gray-500">No records found</td></tr>
               ) : (
                 rows.map((row) => (
                   <tr key={row.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
                     <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{row.employee?.full_name ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
-                      {new Date(row.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      {new Date(row.date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                     </td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{formatTime(row.clock_in)}</td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{formatTime(row.clock_out)}</td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{calcHours(row.clock_in, row.clock_out)}</td>
                     <td className="px-4 py-3"><StatusBadge status={row.status} /></td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => openEditModal(row)}
+                        title="Edit"
+                        className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">
+                        <i className="ti ti-pencil text-base" />
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -271,21 +333,16 @@ export default function AttendancePage() {
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 w-full max-w-md shadow-2xl">
-            {/* Modal header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
               <h2 className="text-base font-semibold text-gray-900 dark:text-white">Manual Attendance Entry</h2>
               <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors">
                 <i className="ti ti-x text-lg" />
               </button>
             </div>
-
-            {/* Modal body */}
             <div className="px-6 py-5 space-y-4">
               {modalError && (
                 <div className="px-4 py-2.5 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm">{modalError}</div>
               )}
-
-              {/* Employee */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Employee</label>
                 <select value={form.employee_id} onChange={e => setForm(f => ({ ...f, employee_id: e.target.value }))}
@@ -294,15 +351,11 @@ export default function AttendancePage() {
                   {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.full_name}</option>)}
                 </select>
               </div>
-
-              {/* Date */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Date</label>
                 <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
                   className="h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
-
-              {/* Clock In / Clock Out */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Clock In</label>
@@ -315,8 +368,6 @@ export default function AttendancePage() {
                     className="h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
               </div>
-
-              {/* Status */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Status</label>
                 <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as ManualForm['status'] }))}
@@ -324,11 +375,10 @@ export default function AttendancePage() {
                   <option value="present">Present</option>
                   <option value="late">Late</option>
                   <option value="absent">Absent</option>
+                  <option value="cl">Casual Leave (CL)</option>
                 </select>
               </div>
             </div>
-
-            {/* Modal footer */}
             <div className="flex gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700">
               <button onClick={closeModal}
                 className="flex-1 h-9 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
@@ -339,6 +389,65 @@ export default function AttendancePage() {
                 {submitting
                   ? <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
                   : 'Save Entry'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {showEditModal && editForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 w-full max-w-md shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Edit Attendance Record</h2>
+              <button onClick={closeEditModal} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors">
+                <i className="ti ti-x text-lg" />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              {editError && (
+                <div className="px-4 py-2.5 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm">{editError}</div>
+              )}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Date</label>
+                <div className="h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400 text-sm flex items-center">
+                  {new Date(editForm.date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Clock In</label>
+                  <input type="time" value={editForm.clock_in} onChange={e => setEditForm(f => f ? { ...f, clock_in: e.target.value } : f)}
+                    className="h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Clock Out</label>
+                  <input type="time" value={editForm.clock_out} onChange={e => setEditForm(f => f ? { ...f, clock_out: e.target.value } : f)}
+                    className="h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Status</label>
+                <select value={editForm.status} onChange={e => setEditForm(f => f ? { ...f, status: e.target.value as EditForm['status'] } : f)}
+                  className="h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="present">Present</option>
+                  <option value="late">Late</option>
+                  <option value="absent">Absent</option>
+                  <option value="cl">Casual Leave (CL)</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700">
+              <button onClick={closeEditModal}
+                className="flex-1 h-9 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                Cancel
+              </button>
+              <button onClick={handleEditSubmit} disabled={editSubmitting}
+                className="flex-1 h-9 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-medium transition-colors flex items-center justify-center gap-2">
+                {editSubmitting
+                  ? <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                  : 'Save Changes'}
               </button>
             </div>
           </div>
