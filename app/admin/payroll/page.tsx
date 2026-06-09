@@ -25,7 +25,7 @@ type PayrollRow = {
   deduction: number;
   net_pay: number;
   status: 'draft' | 'approved' | 'paid';
-  employee: { full_name: string; };
+  employee: { full_name: string; department: string; };
 };
 
 type Employee = {
@@ -107,6 +107,66 @@ function exportPDF(rows: PayrollRow[], month: number, year: number) {
   doc.save(`payroll-${months[month - 1]}-${year}.pdf`);
 }
 
+function generatePayslip(row: PayrollRow) {
+  const perDay = (row.gross_salary / row.working_days).toFixed(2);
+  const monthName = months[row.month - 1];
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>Payslip - ${monthName} ${row.year}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:Arial,sans-serif;padding:40px;color:#1a1a2e;}
+.header{border-bottom:2px solid #7c3aed;padding-bottom:16px;margin-bottom:24px;}
+.company{font-size:20px;font-weight:700;color:#7c3aed;}
+.subtitle{font-size:13px;color:#666;margin-top:2px;}
+.meta{display:flex;justify-content:space-between;margin-bottom:24px;}
+.meta-label{font-size:11px;color:#999;text-transform:uppercase;letter-spacing:0.05em;}
+.meta-value{font-size:14px;font-weight:600;margin-top:2px;}
+table{width:100%;border-collapse:collapse;}
+tr{border-bottom:1px solid #f0f0f0;}
+td{padding:10px 12px;font-size:13px;}
+td:last-child{text-align:right;font-weight:500;}
+.net td{background:#f5f0ff;font-weight:700;font-size:14px;color:#7c3aed;border-bottom:none;}
+.badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600;}
+.footer{margin-top:32px;font-size:11px;color:#aaa;text-align:center;}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="company">NarrativeX Media</div>
+  <div class="subtitle">Payslip &#8212; ${monthName} ${row.year}</div>
+</div>
+<div class="meta">
+  <div><div class="meta-label">Employee</div><div class="meta-value">${row.employee?.full_name ?? '—'}</div></div>
+  <div><div class="meta-label">Department</div><div class="meta-value">${row.employee?.department ?? '—'}</div></div>
+  <div><div class="meta-label">Status</div><div class="meta-value">
+    <span class="badge" style="background:${row.status === 'paid' ? '#dcfce7' : '#ede9fe'};color:${row.status === 'paid' ? '#16a34a' : '#7c3aed'}">
+      ${row.status.charAt(0).toUpperCase() + row.status.slice(1)}
+    </span>
+  </div></div>
+</div>
+<table>
+  <tr><td>Gross Salary</td><td>&#8377;${fmt(row.gross_salary)}</td></tr>
+  <tr><td>Working Days</td><td>${row.working_days}</td></tr>
+  <tr><td>Present Days</td><td>${row.present_days}</td></tr>
+  <tr><td>Absent Days</td><td>${row.absent_days}</td></tr>
+  <tr><td>CL Days Used</td><td>${row.cl_days}</td></tr>
+  <tr><td>LOP Days</td><td>${row.lop_days}</td></tr>
+  <tr><td>Per Day Rate</td><td>&#8377;${perDay}</td></tr>
+  <tr><td>Deduction</td><td>&#8377;${fmt(row.deduction)}</td></tr>
+  <tr class="net"><td>Net Pay</td><td>&#8377;${fmt(row.net_pay)}</td></tr>
+</table>
+<div class="footer">Generated on ${new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })} &#183; NarrativeX Media</div>
+</body>
+</html>`;
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank');
+  if (win) win.focus();
+}
+
 function getWorkingDays(year: number, month: number, holidays: string[]): number {
   const holidaySet = new Set(holidays);
   let count = 0;
@@ -137,7 +197,7 @@ export default function PayrollPage() {
     setLoading(true);
     const { data, error } = await supabase
       .from('payroll')
-      .select('*, employee:employees!payroll_employee_id_fkey(full_name)')
+      .select('*, employee:employees!payroll_employee_id_fkey(full_name, department)')
       .eq('month', filterMonth)
       .eq('year', filterYear)
       .order('employee(full_name)', { ascending: true });
@@ -406,8 +466,7 @@ export default function PayrollPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50">
-                {['Employee', 'Working Days', 'Present', 'Absent', 'CL', 'LOP', 'Gross', 'Deduction', 'Net Pay', 'Status'].map((h, i) => (
-                  <th key={i} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+              {['Employee', 'Working Days', 'Present', 'Absent', 'CL', 'LOP', 'Gross', 'Deduction', 'Net Pay', 'Status', ''].map((h, i) => (                  <th key={i} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
@@ -442,6 +501,15 @@ export default function PayrollPage() {
                         {row.status}
                       </span>
                     </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => generatePayslip(row)}
+                        className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors whitespace-nowrap"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Payslip
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -459,6 +527,7 @@ export default function PayrollPage() {
                   <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">
                     ₹{fmt(payrollRows.reduce((s, r) => s + r.net_pay, 0))}
                   </td>
+                  <td />
                   <td />
                 </tr>
               </tfoot>
