@@ -9,6 +9,7 @@ const navItems = [
   { label: 'Dashboard', href: '/admin/dashboard', icon: 'ti-layout-dashboard' },
   { label: 'Employees', href: '/admin/employees', icon: 'ti-users' },
   { label: 'Attendance', href: '/admin/attendance', icon: 'ti-clock' },
+  { label: 'Holidays', href: '/admin/holidays', icon: 'ti-calendar-event' },
   { label: 'Payroll', href: '/admin/payroll', icon: 'ti-currency-rupee' },
   { label: 'Reports', href: '/admin/reports', icon: 'ti-file-analytics' },
   { label: 'Screenshots', href: '/admin/screenshots', icon: 'ti-screenshot' },
