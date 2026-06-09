@@ -2,6 +2,9 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -40,6 +43,68 @@ const currentYear = now.getFullYear();
 
 function fmt(n: number) {
   return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+}
+
+function exportCSV(rows: PayrollRow[], month: number, year: number) {
+  const headers = ['Employee', 'Working Days', 'Present', 'Absent', 'CL', 'LOP', 'Gross', 'Deduction', 'Net Pay', 'Status'];
+  const data = rows.map(r => [
+    r.employee?.full_name ?? '',
+    r.working_days, r.present_days, r.absent_days, r.cl_days, r.lop_days,
+    r.gross_salary, r.deduction, r.net_pay, r.status,
+  ]);
+  const csv = [headers, ...data].map(row => row.join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `payroll-${months[month - 1]}-${year}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportExcel(rows: PayrollRow[], month: number, year: number) {
+  const headers = ['Employee', 'Working Days', 'Present', 'Absent', 'CL', 'LOP', 'Gross (₹)', 'Deduction (₹)', 'Net Pay (₹)', 'Status'];
+  const data = rows.map(r => [
+    r.employee?.full_name ?? '',
+    r.working_days, r.present_days, r.absent_days, r.cl_days, r.lop_days,
+    r.gross_salary, r.deduction, r.net_pay, r.status,
+  ]);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+  ws['!cols'] = [20, 14, 10, 10, 8, 8, 14, 14, 14, 10].map(w => ({ wch: w }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, `${months[month - 1]} ${year}`);
+  XLSX.writeFile(wb, `payroll-${months[month - 1]}-${year}.xlsx`);
+}
+
+function exportPDF(rows: PayrollRow[], month: number, year: number) {
+  const doc = new jsPDF({ orientation: 'landscape' });
+  doc.setFontSize(14);
+  doc.text(`Payroll — ${months[month - 1]} ${year}`, 14, 16);
+  doc.setFontSize(10);
+  doc.text(`Generated: ${new Date().toLocaleDateString('en-IN')}`, 14, 23);
+
+  autoTable(doc, {
+    startY: 28,
+    head: [['Employee', 'Working Days', 'Present', 'Absent', 'CL', 'LOP', 'Gross (₹)', 'Deduction (₹)', 'Net Pay (₹)', 'Status']],
+    body: rows.map(r => [
+      r.employee?.full_name ?? '',
+      r.working_days, r.present_days, r.absent_days, r.cl_days, r.lop_days,
+      fmt(r.gross_salary), fmt(r.deduction), fmt(r.net_pay), r.status,
+    ]),
+    foot: [[
+      'Total', '', '', '', '', '',
+      fmt(rows.reduce((s, r) => s + r.gross_salary, 0)),
+      fmt(rows.reduce((s, r) => s + r.deduction, 0)),
+      fmt(rows.reduce((s, r) => s + r.net_pay, 0)),
+      '',
+    ]],
+    headStyles: { fillColor: [30, 30, 60], textColor: 255, fontSize: 9 },
+    footStyles: { fillColor: [240, 240, 240], textColor: 30, fontStyle: 'bold', fontSize: 9 },
+    bodyStyles: { fontSize: 9 },
+    alternateRowStyles: { fillColor: [248, 248, 255] },
+  });
+
+  doc.save(`payroll-${months[month - 1]}-${year}.pdf`);
 }
 
 function getWorkingDays(year: number, month: number, holidays: string[]): number {
@@ -242,6 +307,7 @@ export default function PayrollPage() {
   const isDraft = payrollRows.length > 0 && payrollRows.every(r => r.status === 'draft');
   const isApproved = payrollRows.length > 0 && payrollRows.every(r => r.status === 'approved');
   const isPaid = payrollRows.length > 0 && payrollRows.every(r => r.status === 'paid');
+  const hasRows = payrollRows.length > 0;
 
   const statusColor: Record<string, string> = {
     draft: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
@@ -285,6 +351,25 @@ export default function PayrollPage() {
             }
             Generate Payroll
           </button>
+          {hasRows && (
+            <div className="flex gap-2">
+              <button onClick={() => exportCSV(payrollRows, filterMonth, filterYear)}
+                className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                CSV
+              </button>
+              <button onClick={() => exportExcel(payrollRows, filterMonth, filterYear)}
+                className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Excel
+              </button>
+              <button onClick={() => exportPDF(payrollRows, filterMonth, filterYear)}
+                className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                PDF
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
