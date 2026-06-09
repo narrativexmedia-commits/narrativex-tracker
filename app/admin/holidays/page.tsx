@@ -71,14 +71,17 @@ export default function HolidaysPage() {
   const fetchHolidays = useCallback(async () => {
     setLoading(true);
     const monthStr = String(filterMonth).padStart(2, '0');
-    const from = `${filterYear}-${monthStr}-01`;
-    const to = `${filterYear}-${monthStr}-31`;
+const from = `${filterYear}-${monthStr}-01`;
+const nextMonth = filterMonth === 12 ? 1 : filterMonth + 1;
+const nextYear = filterMonth === 12 ? filterYear + 1 : filterYear;
+const nextMonthStr = String(nextMonth).padStart(2, '0');
+const to = `${nextYear}-${nextMonthStr}-01`;
 
     const { data, error } = await supabase
       .from('holidays')
       .select('id, date, name, type')
       .gte('date', from)
-      .lte('date', to)
+.lt('date', to)
       .order('date', { ascending: true });
 
     if (!error && data) setHolidays(data as Holiday[]);
