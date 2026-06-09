@@ -10,6 +10,7 @@ type Employee = {
   phone: string
   department: string
   join_date: string
+  exit_date: string | null
   role: string
   salary: number
   is_active: boolean
@@ -21,6 +22,7 @@ const emptyForm = {
   phone: '',
   department: '',
   join_date: '',
+  exit_date: '',
   role: 'employee',
   salary: '',
 }
@@ -60,6 +62,7 @@ export default function EmployeesPage() {
       phone: emp.phone ?? '',
       department: emp.department ?? '',
       join_date: emp.join_date ?? '',
+      exit_date: emp.exit_date ?? '',
       role: emp.role,
       salary: String(emp.salary),
     })
@@ -81,21 +84,20 @@ export default function EmployeesPage() {
       phone: form.phone,
       department: form.department,
       join_date: form.join_date || null,
+      exit_date: form.exit_date || null,
       role: form.role,
       salary: parseFloat(form.salary as string) || 0,
     }
     if (editId) {
       const { error: e } = await supabase.from('employees').update(payload).eq('id', editId)
-      if (e) setError(e.message)
+      if (e) { setError(e.message); setSaving(false); return; }
     } else {
       const { error: e } = await supabase.from('employees').insert(payload)
-      if (e) setError(e.message)
+      if (e) { setError(e.message); setSaving(false); return; }
     }
     setSaving(false)
-    if (!error) {
-      setShowModal(false)
-      fetchEmployees()
-    }
+    setShowModal(false)
+    fetchEmployees()
   }
 
   const handleDeactivate = async (id: string, current: boolean) => {
@@ -143,7 +145,6 @@ export default function EmployeesPage() {
         <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13 }}>No employees yet. Add one.</div>
       ) : (
         <div style={{ background: '#12122a', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 8, overflow: 'hidden' }}>
-          {/* Table header */}
           <div style={{
             display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 1fr 1fr 80px',
             padding: '9px 16px', fontSize: 11,
@@ -227,7 +228,6 @@ export default function EmployeesPage() {
               {editId ? 'Edit Employee' : 'Add Employee'}
             </div>
 
-            {/* Form */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div style={{ gridColumn: '1/-1' }}>
                 <label style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>Full Name *</label>
@@ -263,11 +263,18 @@ export default function EmployeesPage() {
                 <label style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>Salary (INR/month)</label>
                 <input style={inp} type="number" value={form.salary} onChange={e => setForm(f => ({ ...f, salary: e.target.value }))} placeholder="25000" />
               </div>
+
+              {/* Exit date — only show when editing */}
+              {editId && (
+                <div style={{ gridColumn: '1/-1' }}>
+                  <label style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>Exit Date <span style={{ color: 'rgba(255,255,255,0.25)' }}>(leave blank if still employed)</span></label>
+                  <input style={inp} type="date" value={form.exit_date} onChange={e => setForm(f => ({ ...f, exit_date: e.target.value }))} />
+                </div>
+              )}
             </div>
 
             {error && <div style={{ fontSize: 12, color: '#f87171', marginTop: 12 }}>{error}</div>}
 
-            {/* Actions */}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
               <button
                 onClick={() => setShowModal(false)}
