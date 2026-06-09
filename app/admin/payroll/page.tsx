@@ -82,7 +82,6 @@ function exportPDF(rows: PayrollRow[], month: number, year: number) {
   doc.text(`Payroll — ${months[month - 1]} ${year}`, 14, 16);
   doc.setFontSize(10);
   doc.text(`Generated: ${new Date().toLocaleDateString('en-IN')}`, 14, 23);
-
   autoTable(doc, {
     startY: 28,
     head: [['Employee', 'Working Days', 'Present', 'Absent', 'CL', 'LOP', 'Gross (₹)', 'Deduction (₹)', 'Net Pay (₹)', 'Status']],
@@ -103,7 +102,6 @@ function exportPDF(rows: PayrollRow[], month: number, year: number) {
     bodyStyles: { fontSize: 9 },
     alternateRowStyles: { fillColor: [248, 248, 255] },
   });
-
   doc.save(`payroll-${months[month - 1]}-${year}.pdf`);
 }
 
@@ -173,8 +171,7 @@ function getWorkingDays(year: number, month: number, holidays: string[]): number
   const daysInMonth = new Date(year, month, 0).getDate();
   for (let d = 1; d <= daysInMonth; d++) {
     const date = new Date(year, month - 1, d);
-    const day = date.getDay();
-    if (day === 0) continue; // Sunday
+    if (date.getDay() === 0) continue;
     const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     if (holidaySet.has(dateStr)) continue;
     count++;
@@ -185,21 +182,22 @@ function getWorkingDays(year: number, month: number, holidays: string[]): number
 export default function PayrollPage() {
   const [filterMonth, setFilterMonth] = useState(currentMonth);
   const [filterYear, setFilterYear] = useState(currentYear);
+  const [filterEmployee, setFilterEmployee] = useState<string>('all');
+  const [activeEmployees, setActiveEmployees] = useState<Employee[]>([]);
   const [payrollRows, setPayrollRows] = useState<PayrollRow[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [approving, setApproving] = useState(false);
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
-  const [filterEmployee, setFilterEmployee] = useState<string>('all');
-  const [activeEmployees, setActiveEmployees] = useState<Employee[]>([]);
+
+  const years = [currentYear - 1, currentYear, currentYear + 1];
 
   useEffect(() => {
     supabase.from('employees').select('id, full_name, salary, is_active, exit_date')
       .eq('is_active', true).order('full_name')
       .then(({ data }) => setActiveEmployees(data ?? []));
   }, []);
-
-  const years = [currentYear - 1, currentYear, currentYear + 1];
 
   const fetchPayroll = useCallback(async () => {
     setLoading(true);
@@ -212,6 +210,7 @@ export default function PayrollPage() {
     const { data, error } = await query.order('employee(full_name)', { ascending: true });
     if (!error && data) setPayrollRows(data as unknown as PayrollRow[]);
     else setPayrollRows([]);
+    setSelectedIds(new Set());
     setLoading(false);
   }, [filterMonth, filterYear, filterEmployee]);
 
@@ -221,29 +220,28 @@ export default function PayrollPage() {
     setMessage(null);
     setGenerating(true);
 
-    // Check existing
     const { data: existing } = await supabase
       .from('payroll')
-      .select('id, status')
+      .select('id, status, employee_id')
       .eq('month', filterMonth)
       .eq('year', filterYear);
 
-   if (existing && existing.length > 0) {
-      const hasLockedRecords = existing.some(r => r.status === 'approved' || r.status === 'paid');
-      if (hasLockedRecords) {
-        setMessage({ type: 'error', text: 'Payroll already approved or paid for this month. Cannot regenerate.' });
+    if (existing && existing.length > 0) {
+      const relevant = filterEmployee === 'all'
+        ? existing
+        : existing.filter(r => r.employee_id === filterEmployee);
+      const hasLocked = relevant.some(r => r.status === 'approved' || r.status === 'paid');
+      if (hasLocked) {
+        setMessage({ type: 'error', text: 'Payroll already approved or paid. Cannot regenerate.' });
         setGenerating(false);
         return;
       }
-      // Delete only relevant drafts
       let delQuery = supabase.from('payroll').delete()
-        .eq('month', filterMonth).eq('year', filterYear);
+        .eq('month', filterMonth).eq('year', filterYear).eq('status', 'draft');
       if (filterEmployee !== 'all') delQuery = delQuery.eq('employee_id', filterEmployee);
       await delQuery;
     }
 
-    // Fetch active employees
-    // Fetch active employees
     let empQuery = supabase
       .from('employees')
       .select('id, full_name, salary, is_active, exit_date')
@@ -257,7 +255,6 @@ export default function PayrollPage() {
       return;
     }
 
-    // Fetch holidays for this month
     const monthStr = String(filterMonth).padStart(2, '0');
     const nextMonth = filterMonth === 12 ? 1 : filterMonth + 1;
     const nextYear = filterMonth === 12 ? filterYear + 1 : filterYear;
@@ -272,7 +269,6 @@ export default function PayrollPage() {
     const holidayDates = (holidays ?? []).map((h: { date: string }) => h.date);
     const workingDays = getWorkingDays(filterYear, filterMonth, holidayDates);
 
-    // Fetch attendance for all employees this month
     const { data: attendance } = await supabase
       .from('attendance')
       .select('employee_id, status')
@@ -286,20 +282,16 @@ export default function PayrollPage() {
       if (a.status === 'cl') attendanceMap[a.employee_id].cl++;
     });
 
-    // Build payroll records
     const records = (employees as Employee[]).map(emp => {
       const att = attendanceMap[emp.id] ?? { present: 0, cl: 0 };
       const presentDays = att.present;
       const clDays = att.cl;
-
-      // If employee exited mid-month, cap their payable days
       let daysToPayFor = workingDays;
       if (emp.exit_date) {
         const exit = new Date(emp.exit_date);
         const exitMonth = exit.getMonth() + 1;
         const exitYear = exit.getFullYear();
         if (exitMonth === filterMonth && exitYear === filterYear) {
-          // Count working days from 1st to exit_date only
           let count = 0;
           for (let d = 1; d <= exit.getDate(); d++) {
             const date = new Date(filterYear, filterMonth - 1, d);
@@ -311,14 +303,12 @@ export default function PayrollPage() {
           daysToPayFor = count;
         }
       }
-
       const absentDays = Math.max(0, daysToPayFor - presentDays - clDays);
       const lopDays = Math.max(0, absentDays - clDays);
       const perDay = workingDays > 0 ? emp.salary / workingDays : 0;
       const earnedPay = parseFloat((perDay * daysToPayFor).toFixed(2));
       const deduction = parseFloat((perDay * lopDays).toFixed(2));
       const netPay = parseFloat((earnedPay - deduction).toFixed(2));
-
       return {
         employee_id: emp.id,
         month: filterMonth,
@@ -337,12 +327,7 @@ export default function PayrollPage() {
 
     const { error: insertError } = await supabase.from('payroll').insert(records);
     setGenerating(false);
-
-    if (insertError) {
-      setMessage({ type: 'error', text: insertError.message });
-      return;
-    }
-
+    if (insertError) { setMessage({ type: 'error', text: insertError.message }); return; }
     setMessage({ type: 'success', text: `Payroll generated for ${months[filterMonth - 1]} ${filterYear}.` });
     fetchPayroll();
   }
@@ -352,15 +337,28 @@ export default function PayrollPage() {
     setMessage(null);
     const ids = payrollRows.filter(r => r.status === 'draft').map(r => r.id);
     if (ids.length === 0) { setApproving(false); return; }
-
     const { error } = await supabase
       .from('payroll')
       .update({ status: 'approved', approved_at: new Date().toISOString() })
       .in('id', ids);
-
     setApproving(false);
     if (error) { setMessage({ type: 'error', text: error.message }); return; }
-    setMessage({ type: 'success', text: 'Payroll approved.' });
+    setMessage({ type: 'success', text: 'All drafts approved.' });
+    fetchPayroll();
+  }
+
+  async function handleApproveSelected() {
+    setApproving(true);
+    setMessage(null);
+    const ids = [...selectedIds].filter(id => payrollRows.find(r => r.id === id && r.status === 'draft'));
+    if (ids.length === 0) { setApproving(false); return; }
+    const { error } = await supabase
+      .from('payroll')
+      .update({ status: 'approved', approved_at: new Date().toISOString() })
+      .in('id', ids);
+    setApproving(false);
+    if (error) { setMessage({ type: 'error', text: error.message }); return; }
+    setMessage({ type: 'success', text: `${ids.length} employee(s) approved.` });
     fetchPayroll();
   }
 
@@ -368,27 +366,43 @@ export default function PayrollPage() {
     setMessage(null);
     const ids = payrollRows.filter(r => r.status === 'approved').map(r => r.id);
     if (ids.length === 0) return;
-
     const { error } = await supabase
       .from('payroll')
       .update({ status: 'paid', paid_at: new Date().toISOString() })
       .in('id', ids);
-
     if (error) { setMessage({ type: 'error', text: error.message }); return; }
     setMessage({ type: 'success', text: 'Payroll marked as paid.' });
     fetchPayroll();
   }
 
+  async function handleRefresh() {
+    setMessage(null);
+    let delQuery = supabase.from('payroll').delete()
+      .eq('month', filterMonth).eq('year', filterYear).eq('status', 'draft');
+    if (filterEmployee !== 'all') delQuery = delQuery.eq('employee_id', filterEmployee);
+    await delQuery;
+    fetchPayroll();
+  }
+
+  const draftRows = payrollRows.filter(r => r.status === 'draft');
   const isDraft = payrollRows.length > 0 && payrollRows.every(r => r.status === 'draft');
   const isApproved = payrollRows.length > 0 && payrollRows.every(r => r.status === 'approved');
   const isPaid = payrollRows.length > 0 && payrollRows.every(r => r.status === 'paid');
   const hasRows = payrollRows.length > 0;
+  const hasDrafts = draftRows.length > 0;
 
   const statusColor: Record<string, string> = {
     draft: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
     approved: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
     paid: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
   };
+
+  const spinnerSVG = (
+    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+    </svg>
+  );
 
   return (
     <div className="p-6 space-y-6">
@@ -401,16 +415,27 @@ export default function PayrollPage() {
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
+          {/* Approve Selected */}
+          {selectedIds.size > 0 && (
+            <button onClick={handleApproveSelected} disabled={approving}
+              className="flex items-center gap-2 h-9 px-4 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white text-sm font-medium transition-colors">
+              {approving ? spinnerSVG : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              )}
+              Approve Selected ({selectedIds.size})
+            </button>
+          )}
+          {/* Approve All */}
           {isDraft && (
             <button onClick={handleApproveAll} disabled={approving}
               className="flex items-center gap-2 h-9 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-medium transition-colors">
-              {approving
-                ? <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-                : <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              }
+              {approving ? spinnerSVG : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              )}
               Approve All
             </button>
           )}
+          {/* Mark Paid */}
           {isApproved && (
             <button onClick={handleMarkPaid}
               className="flex items-center gap-2 h-9 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors">
@@ -418,14 +443,15 @@ export default function PayrollPage() {
               Mark as Paid
             </button>
           )}
+          {/* Generate */}
           <button onClick={handleGenerate} disabled={generating || isPaid}
             className="flex items-center gap-2 h-9 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-medium transition-colors">
-            {generating
-              ? <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-              : <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            }
+            {generating ? spinnerSVG : (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            )}
             Generate Payroll
           </button>
+          {/* Exports */}
           {hasRows && (
             <div className="flex gap-2">
               <button onClick={() => exportCSV(payrollRows, filterMonth, filterYear)}
@@ -480,13 +506,13 @@ export default function PayrollPage() {
               {activeEmployees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
             </select>
           </div>
-          <button
-            onClick={() => { setMessage(null); fetchPayroll(); }}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            Refresh
-          </button>
+          {hasDrafts && (
+            <button onClick={handleRefresh}
+              className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              Refresh
+            </button>
+          )}
         </div>
       </div>
 
@@ -496,25 +522,39 @@ export default function PayrollPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50">
-              {['Employee', 'Working Days', 'Present', 'Absent', 'CL', 'LOP', 'Gross', 'Deduction', 'Net Pay', 'Status', ''].map((h, i) => (                  <th key={i} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                {['', 'Employee', 'Working Days', 'Present', 'Absent', 'CL', 'LOP', 'Gross', 'Deduction', 'Net Pay', 'Status', ''].map((h, i) => (
+                  <th key={i} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
               {loading ? (
-                <tr><td colSpan={10} className="text-center py-12 text-gray-400 dark:text-gray-500">
-                  <div className="flex items-center justify-center gap-2">
-                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-                    Loading...
-                  </div>
+                <tr><td colSpan={13} className="text-center py-12 text-gray-400 dark:text-gray-500">
+                  <div className="flex items-center justify-center gap-2">{spinnerSVG} Loading...</div>
                 </td></tr>
               ) : payrollRows.length === 0 ? (
-                <tr><td colSpan={10} className="text-center py-12 text-gray-400 dark:text-gray-500">
+                <tr><td colSpan={13} className="text-center py-12 text-gray-400 dark:text-gray-500">
                   No payroll generated for {months[filterMonth - 1]} {filterYear}
                 </td></tr>
               ) : (
                 payrollRows.map(row => (
                   <tr key={row.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                    <td className="px-4 py-3">
+                      {row.status === 'draft' && (
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(row.id)}
+                          onChange={e => {
+                            setSelectedIds(prev => {
+                              const next = new Set(prev);
+                              e.target.checked ? next.add(row.id) : next.delete(row.id);
+                              return next;
+                            });
+                          }}
+                          className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 accent-purple-600 cursor-pointer"
+                        />
+                      )}
+                    </td>
                     <td className="px-4 py-3 font-medium text-gray-900 dark:text-white whitespace-nowrap">{row.employee?.full_name ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.working_days}</td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.present_days}</td>
@@ -532,10 +572,8 @@ export default function PayrollPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <button
-                        onClick={() => generatePayslip(row)}
-                        className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors whitespace-nowrap"
-                      >
+                      <button onClick={() => generatePayslip(row)}
+                        className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors whitespace-nowrap">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                         Payslip
                       </button>
@@ -547,6 +585,7 @@ export default function PayrollPage() {
             {payrollRows.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50">
+                  <td className="px-4 py-3" />
                   <td className="px-4 py-3 font-semibold text-gray-700 dark:text-gray-200" colSpan={6}>Total</td>
                   <td className="px-4 py-3 font-semibold text-gray-700 dark:text-gray-200">
                     ₹{fmt(payrollRows.reduce((s, r) => s + r.gross_salary, 0))}
@@ -557,8 +596,7 @@ export default function PayrollPage() {
                   <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">
                     ₹{fmt(payrollRows.reduce((s, r) => s + r.net_pay, 0))}
                   </td>
-                  <td />
-                  <td />
+                  <td /><td />
                 </tr>
               </tfoot>
             )}
