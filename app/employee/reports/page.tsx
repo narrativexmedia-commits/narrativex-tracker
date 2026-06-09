@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 
 const supabase = createBrowserClient(
@@ -76,10 +76,9 @@ export default function EmployeeReportsPage() {
     });
   }, []);
 
-  async function generateReport() {
-    if (!fromDate || !toDate || !empId) return alert("Select date range");
+  const generateReport = useCallback(async (activeView: "summary" | "detailed") => {
+    if (!fromDate || !toDate || !empId) return;
     setLoading(true);
-    setGenerated(false);
 
     const { data: attData } = await supabase
       .from("attendance")
@@ -111,7 +110,7 @@ export default function EmployeeReportsPage() {
       if (data) payrollRows = [...payrollRows, ...data];
     }
 
-    if (view === "summary") {
+    if (activeView === "summary") {
       const rows: SummaryRow[] = months.map(({ month, year }) => {
         const monthAtt = attendance.filter((a) => {
           const d = new Date(a.date);
@@ -122,8 +121,7 @@ export default function EmployeeReportsPage() {
         const absent = monthAtt.filter((a) => a.status === "absent").length;
         const p = payrollRows.find((p) => p.month === month && p.year === year);
         return {
-          month, year,
-          present, late, absent,
+          month, year, present, late, absent,
           cl_days: p ? Number(p.cl_days) : 0,
           lop_days: p ? Number(p.lop_days) : 0,
           working_days: p ? Number(p.working_days) : 0,
@@ -143,6 +141,15 @@ export default function EmployeeReportsPage() {
 
     setLoading(false);
     setGenerated(true);
+  }, [fromDate, toDate, empId]);
+
+  useEffect(() => {
+    if (generated) generateReport(view);
+  }, [view]);
+
+  function handleGenerate() {
+    if (!fromDate || !toDate) return alert("Select date range");
+    generateReport(view);
   }
 
   function exportCSV() {
@@ -215,7 +222,6 @@ export default function EmployeeReportsPage() {
     <div className="p-6 min-h-screen bg-[#1a1a2e] text-white">
       <h1 className="text-xl font-bold mb-6">My Reports</h1>
 
-      {/* Filters */}
       <div className="bg-[#12122a] rounded-xl p-5 mb-6">
         <div className="flex flex-wrap gap-4 items-end">
           <div>
@@ -229,7 +235,7 @@ export default function EmployeeReportsPage() {
               value={toDate} onChange={(e) => setToDate(e.target.value)} />
           </div>
           <button
-            onClick={generateReport}
+            onClick={handleGenerate}
             disabled={loading}
             className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">
             {loading ? "Loading..." : "Generate"}
@@ -237,17 +243,16 @@ export default function EmployeeReportsPage() {
         </div>
       </div>
 
-      {/* Toggle + Export */}
       {generated && (
         <div className="flex justify-between items-center mb-4">
           <div className="flex gap-2">
             <button
-              onClick={() => { setView("summary"); setGenerated(false); }}
+              onClick={() => setView("summary")}
               className={`px-4 py-2 rounded-lg text-sm font-semibold ${view === "summary" ? "bg-purple-600 text-white" : "bg-[#2d2d4e] text-white/60"}`}>
               Summary
             </button>
             <button
-              onClick={() => { setView("detailed"); setGenerated(false); }}
+              onClick={() => setView("detailed")}
               className={`px-4 py-2 rounded-lg text-sm font-semibold ${view === "detailed" ? "bg-purple-600 text-white" : "bg-[#2d2d4e] text-white/60"}`}>
               Detailed
             </button>
@@ -259,8 +264,9 @@ export default function EmployeeReportsPage() {
         </div>
       )}
 
-      {/* Summary Table */}
-      {generated && view === "summary" && (
+      {loading && <div className="text-slate-400 text-center py-8">Loading...</div>}
+
+      {!loading && generated && view === "summary" && (
         <div className="bg-[#12122a] rounded-xl overflow-hidden">
           <table className="w-full">
             <thead>
@@ -288,8 +294,7 @@ export default function EmployeeReportsPage() {
         </div>
       )}
 
-      {/* Detailed Table */}
-      {generated && view === "detailed" && (
+      {!loading && generated && view === "detailed" && (
         <div className="bg-[#12122a] rounded-xl overflow-hidden">
           <table className="w-full">
             <thead>

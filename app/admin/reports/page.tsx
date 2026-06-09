@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 
 type Employee = {
@@ -62,11 +62,6 @@ function toIST(dateStr: string | null): string {
   });
 }
 
-function getMonthYear(dateStr: string): { month: number; year: number } {
-  const d = new Date(dateStr);
-  return { month: d.getMonth() + 1, year: d.getFullYear() };
-}
-
 export default function ReportsPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [view, setView] = useState<"summary" | "detailed">("summary");
@@ -79,8 +74,6 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false);
   const [generated, setGenerated] = useState(false);
 
-  const d = true; // dark mode
-
   useEffect(() => {
     supabase
       .from("employees")
@@ -92,10 +85,9 @@ export default function ReportsPage() {
 
   const departments = Array.from(new Set(employees.map((e) => e.department))).filter(Boolean);
 
-  async function generateReport() {
-    if (!fromDate || !toDate) return alert("Select date range");
+  const generateReport = useCallback(async (activeView: "summary" | "detailed") => {
+    if (!fromDate || !toDate) return;
     setLoading(true);
-    setGenerated(false);
 
     let empQuery = supabase
       .from("attendance")
@@ -109,15 +101,12 @@ export default function ReportsPage() {
     const { data: attData } = await empQuery;
     const attendance: AttendanceRow[] = attData || [];
 
-    // get all relevant employee_ids
     const empIds = empFilter === "all"
       ? employees.filter((e) => deptFilter === "all" || e.department === deptFilter).map((e) => e.id)
       : [empFilter];
 
-    // filter attendance by dept if needed
     const filteredAtt = attendance.filter((a) => empIds.includes(a.employee_id));
 
-    // get payroll for months in range
     const months: { month: number; year: number }[] = [];
     const start = new Date(fromDate);
     const end = new Date(toDate);
@@ -138,32 +127,23 @@ export default function ReportsPage() {
       if (data) payrollRows = [...payrollRows, ...data];
     }
 
-    if (view === "summary") {
+    if (activeView === "summary") {
       const rows: SummaryRow[] = empIds.map((eid) => {
         const emp = employees.find((e) => e.id === eid);
         const empAtt = filteredAtt.filter((a) => a.employee_id === eid);
         const present = empAtt.filter((a) => a.status === "present").length;
         const late = empAtt.filter((a) => a.status === "late").length;
         const absent = empAtt.filter((a) => a.status === "absent").length;
-
-        // aggregate payroll for range
         const empPayroll = payrollRows.filter((p) => p.employee_id === eid);
         const payroll_found = empPayroll.length > 0;
         const cl_days = empPayroll.reduce((s, p) => s + Number(p.cl_days), 0);
         const lop_days = empPayroll.reduce((s, p) => s + Number(p.lop_days), 0);
         const working_days = empPayroll.reduce((s, p) => s + Number(p.working_days), 0);
-
         return {
           employee_id: eid,
           full_name: emp?.full_name || "Unknown",
           department: emp?.department || "—",
-          present,
-          late,
-          absent,
-          cl_days,
-          lop_days,
-          working_days,
-          payroll_found,
+          present, late, absent, cl_days, lop_days, working_days, payroll_found,
         };
       });
       setSummaryData(rows);
@@ -185,6 +165,16 @@ export default function ReportsPage() {
 
     setLoading(false);
     setGenerated(true);
+  }, [fromDate, toDate, empFilter, deptFilter, employees]);
+
+  // re-run when view toggles (only if already generated)
+  useEffect(() => {
+    if (generated) generateReport(view);
+  }, [view]);
+
+  function handleGenerate() {
+    if (!fromDate || !toDate) return alert("Select date range");
+    generateReport(view);
   }
 
   function exportCSV() {
@@ -276,7 +266,6 @@ export default function ReportsPage() {
     <div style={s.page}>
       <h1 style={{ fontSize: "22px", fontWeight: 700, marginBottom: "24px" }}>Reports</h1>
 
-      {/* Filters */}
       <div style={s.card}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr auto", gap: "16px", alignItems: "flex-end" }}>
           <div>
@@ -301,18 +290,17 @@ export default function ReportsPage() {
               {departments.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>
-          <button style={s.btn("#7c3aed")} onClick={generateReport} disabled={loading}>
+          <button style={s.btn("#7c3aed")} onClick={handleGenerate} disabled={loading}>
             {loading ? "Loading..." : "Generate"}
           </button>
         </div>
       </div>
 
-      {/* View Toggle + Export */}
       {generated && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
           <div style={{ display: "flex", gap: "8px" }}>
-            <button style={s.btn(view === "summary" ? "#7c3aed" : "#2d2d4e")} onClick={() => { setView("summary"); setGenerated(false); }}>Summary</button>
-            <button style={s.btn(view === "detailed" ? "#7c3aed" : "#2d2d4e")} onClick={() => { setView("detailed"); setGenerated(false); }}>Detailed</button>
+            <button style={s.btn(view === "summary" ? "#7c3aed" : "#2d2d4e")} onClick={() => setView("summary")}>Summary</button>
+            <button style={s.btn(view === "detailed" ? "#7c3aed" : "#2d2d4e")} onClick={() => setView("detailed")}>Detailed</button>
           </div>
           <div style={{ display: "flex", gap: "8px" }}>
             <button style={s.btn("#0f766e")} onClick={exportCSV}>Export CSV</button>
@@ -321,8 +309,9 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {/* Summary Table */}
-      {generated && view === "summary" && (
+      {loading && <div style={{ color: "#94a3b8", textAlign: "center", padding: "32px" }}>Loading...</div>}
+
+      {!loading && generated && view === "summary" && (
         <div style={s.card}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
@@ -353,8 +342,7 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {/* Detailed Table */}
-      {generated && view === "detailed" && (
+      {!loading && generated && view === "detailed" && (
         <div style={s.card}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
