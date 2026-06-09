@@ -203,16 +203,17 @@ export default function PayrollPage() {
 
   const fetchPayroll = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    let query = supabase
       .from('payroll')
       .select('*, employee:employees!payroll_employee_id_fkey(full_name, department)')
       .eq('month', filterMonth)
-      .eq('year', filterYear)
-      .order('employee(full_name)', { ascending: true });
+      .eq('year', filterYear);
+    if (filterEmployee !== 'all') query = query.eq('employee_id', filterEmployee);
+    const { data, error } = await query.order('employee(full_name)', { ascending: true });
     if (!error && data) setPayrollRows(data as unknown as PayrollRow[]);
     else setPayrollRows([]);
     setLoading(false);
-  }, [filterMonth, filterYear]);
+  }, [filterMonth, filterYear, filterEmployee]);
 
   useEffect(() => { fetchPayroll(); }, [fetchPayroll]);
 
