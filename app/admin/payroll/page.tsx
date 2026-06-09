@@ -190,6 +190,14 @@ export default function PayrollPage() {
   const [generating, setGenerating] = useState(false);
   const [approving, setApproving] = useState(false);
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [filterEmployee, setFilterEmployee] = useState<string>('all');
+  const [activeEmployees, setActiveEmployees] = useState<Employee[]>([]);
+
+  useEffect(() => {
+    supabase.from('employees').select('id, full_name, salary, is_active, exit_date')
+      .eq('is_active', true).order('full_name')
+      .then(({ data }) => setActiveEmployees(data ?? []));
+  }, []);
 
   const years = [currentYear - 1, currentYear, currentYear + 1];
 
@@ -219,22 +227,28 @@ export default function PayrollPage() {
       .eq('month', filterMonth)
       .eq('year', filterYear);
 
-    if (existing && existing.length > 0) {
+   if (existing && existing.length > 0) {
       const hasLockedRecords = existing.some(r => r.status === 'approved' || r.status === 'paid');
       if (hasLockedRecords) {
         setMessage({ type: 'error', text: 'Payroll already approved or paid for this month. Cannot regenerate.' });
         setGenerating(false);
         return;
       }
-      // Delete drafts
-      await supabase.from('payroll').delete().eq('month', filterMonth).eq('year', filterYear);
+      // Delete only relevant drafts
+      let delQuery = supabase.from('payroll').delete()
+        .eq('month', filterMonth).eq('year', filterYear);
+      if (filterEmployee !== 'all') delQuery = delQuery.eq('employee_id', filterEmployee);
+      await delQuery;
     }
 
     // Fetch active employees
-    const { data: employees } = await supabase
+    // Fetch active employees
+    let empQuery = supabase
       .from('employees')
-      .select('id, full_name, salary, is_active')
+      .select('id, full_name, salary, is_active, exit_date')
       .eq('is_active', true);
+    if (filterEmployee !== 'all') empQuery = empQuery.eq('id', filterEmployee);
+    const { data: employees } = await empQuery;
 
     if (!employees || employees.length === 0) {
       setMessage({ type: 'error', text: 'No active employees found.' });
@@ -457,6 +471,21 @@ export default function PayrollPage() {
               {years.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Employee</label>
+            <select value={filterEmployee} onChange={e => setFilterEmployee(e.target.value)}
+              className="h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[160px]">
+              <option value="all">All Employees</option>
+              {activeEmployees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
+            </select>
+          </div>
+          <button
+            onClick={() => { setMessage(null); fetchPayroll(); }}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            Refresh
+          </button>
         </div>
       </div>
 
