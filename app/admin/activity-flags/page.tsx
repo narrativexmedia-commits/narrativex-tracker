@@ -54,7 +54,7 @@ export default function ActivityFlagsPage() {
     setLoading(true)
     let query = supabase
       .from('activity_flags')
-      .select('*, profiles(full_name)')
+      .select('*, profiles!activity_flags_employee_id_fkey(full_name)')
       .order('flagged_at', { ascending: false })
 
     if (filterStatus) query = query.eq('status', filterStatus)
