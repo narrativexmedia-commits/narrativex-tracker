@@ -13,7 +13,6 @@ const navItems = [
   { label: 'Payroll', href: '/admin/payroll', icon: 'ti-currency-rupee' },
   { label: 'Reports', href: '/admin/reports', icon: 'ti-file-analytics' },
   { label: 'Activity Flags', href: '/admin/activity-flags', icon: 'ti-flag' },
-  { label: 'Screenshots', href: '/admin/screenshots', icon: 'ti-screenshot' },
   { label: 'Settings', href: '/admin/settings', icon: 'ti-settings' },
 ]
 
