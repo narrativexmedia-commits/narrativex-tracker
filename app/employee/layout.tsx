@@ -19,8 +19,8 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) { router.push("/"); return; }
-      supabase.from("employees").select("*").eq("email", user.email).single()
-        .then(({ data }) => { if (!data) router.push("/"); else setEmployee(data); });
+      supabase.from("profiles").select("*").eq("id", user.id).single()
+  .then(({ data }) => { if (!data) router.push("/"); else setEmployee(data); });
     });
   }, []);
 
