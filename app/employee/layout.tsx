@@ -35,6 +35,7 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
     { href: "/employee/holidays", icon: "ti-calendar-event", label: "Holidays" },
     { href: "/employee/payslips", icon: "ti-file-invoice", label: "Payslips" },
     { href: "/employee/reports", icon: "ti-file-analytics", label: "Reports" },
+    { href: "/employee/activity-flags", icon: "ti-flag", label: "Activity Flags" },
   ];
 
   return (
