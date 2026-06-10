@@ -37,11 +37,40 @@ export default function EmployeeDashboard() {
     setLoading(false);
   }
 
+  async function getLocation(): Promise<{ latitude: number; longitude: number } | null> {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) { resolve(null); return; }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+        () => resolve(null),
+        { timeout: 10000 }
+      );
+    });
+  }
+
   async function handleClockIn() {
     setActionLoading(true); setMessage(null);
     try {
-      const res = await fetch("/api/attendance/clock-in", { method: "POST" });
-      const data = await res.json();
+      let res = await fetch("/api/attendance/clock-in", { method: "POST" });
+      let data = await res.json();
+
+      if (res.status === 403) {
+        setMessage({ text: "Verifying location...", type: "success" });
+        const location = await getLocation();
+
+        if (!location) {
+          setMessage({ text: "Location access denied. Please enable location and try again.", type: "error" });
+          setActionLoading(false); return;
+        }
+
+        res = await fetch("/api/attendance/clock-in", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(location),
+        });
+        data = await res.json();
+      }
+
       if (!res.ok) setMessage({ text: data.error || "Clock in failed", type: "error" });
       else { setMessage({ text: "Clocked in successfully!", type: "success" }); await loadData(); }
     } catch { setMessage({ text: "Something went wrong", type: "error" }); }
@@ -51,8 +80,26 @@ export default function EmployeeDashboard() {
   async function handleClockOut() {
     setActionLoading(true); setMessage(null);
     try {
-      const res = await fetch("/api/attendance/clock-out", { method: "POST" });
-      const data = await res.json();
+      let res = await fetch("/api/attendance/clock-out", { method: "POST" });
+      let data = await res.json();
+
+      if (res.status === 403) {
+        setMessage({ text: "Verifying location...", type: "success" });
+        const location = await getLocation();
+
+        if (!location) {
+          setMessage({ text: "Location access denied. Please enable location and try again.", type: "error" });
+          setActionLoading(false); return;
+        }
+
+        res = await fetch("/api/attendance/clock-out", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(location),
+        });
+        data = await res.json();
+      }
+
       if (!res.ok) setMessage({ text: data.error || "Clock out failed", type: "error" });
       else { setMessage({ text: "Clocked out successfully!", type: "success" }); await loadData(); }
     } catch { setMessage({ text: "Something went wrong", type: "error" }); }
@@ -78,7 +125,6 @@ export default function EmployeeDashboard() {
 
   return (
     <div className="max-w-lg mx-auto px-4 py-8 space-y-5">
-      {/* Greeting */}
       <div>
         <p className="text-xs text-white/40 mb-1">{today}</p>
         <h1 className="text-2xl font-bold text-white">
@@ -86,7 +132,6 @@ export default function EmployeeDashboard() {
         </h1>
       </div>
 
-      {/* Attendance Card */}
       <div className="bg-[#12122a] rounded-2xl border border-white/[0.08] overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.08]">
           <span className="text-sm font-semibold text-white">Today's Attendance</span>
@@ -145,7 +190,6 @@ export default function EmployeeDashboard() {
         </div>
       </div>
 
-      {/* My Details */}
       <div className="bg-[#12122a] rounded-2xl border border-white/[0.08]">
         <div className="px-5 py-4 border-b border-white/[0.08]">
           <span className="text-sm font-semibold text-white">My Details</span>
