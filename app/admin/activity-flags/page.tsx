@@ -17,10 +17,10 @@ type Flag = {
   status: string
   admin_note: string | null
   reviewed_at: string | null
-  profiles: { name: string } | null
+  profiles: { full_name: string } | null
 }
 
-type Employee = { id: string; name: string }
+type Employee = { id: string; full_name: string }
 
 export default function ActivityFlagsPage() {
   const [flags, setFlags] = useState<Flag[]>([])
@@ -44,7 +44,7 @@ export default function ActivityFlagsPage() {
   async function fetchEmployees() {
     const { data } = await supabase
       .from('profiles')
-      .select('id, name')
+      .select('id, full_name')
       .eq('role', 'employee')
       .order('name')
     if (data) setEmployees(data)
@@ -54,7 +54,7 @@ export default function ActivityFlagsPage() {
     setLoading(true)
     let query = supabase
       .from('activity_flags')
-      .select('*, profiles(name)')
+      .select('*, profiles(full_name)')
       .order('flagged_at', { ascending: false })
 
     if (filterStatus) query = query.eq('status', filterStatus)
@@ -157,7 +157,7 @@ export default function ActivityFlagsPage() {
         >
           <option value="">All Employees</option>
           {employees.map(e => (
-            <option key={e.id} value={e.id}>{e.name}</option>
+            <option key={e.id} value={e.id}>{e.full_name}</option>
           ))}
         </select>
 
@@ -209,7 +209,7 @@ export default function ActivityFlagsPage() {
                   background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)',
                 }}>
                   <td style={{ padding: '10px 14px', color: '#e2d9ff', fontWeight: 500 }}>
-                    {flag.profiles?.name ?? '—'}
+                    {flag.profiles?.full_name ?? '—'}
                   </td>
                   <td style={{ padding: '10px 14px', color: 'rgba(255,255,255,0.6)' }}>
                     {formatIST(flag.flagged_at)}
@@ -270,7 +270,7 @@ export default function ActivityFlagsPage() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
               {[
-                ['Employee', selectedFlag.profiles?.name ?? '—'],
+                ['Employee', selectedFlag.profiles?.full_name ?? '—'],
                 ['Flagged At', formatIST(selectedFlag.flagged_at)],
                 ['Duration', `${selectedFlag.duration_minutes} min`],
                 ['Status', selectedFlag.status],
