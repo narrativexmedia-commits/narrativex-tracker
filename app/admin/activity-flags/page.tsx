@@ -46,7 +46,7 @@ export default function ActivityFlagsPage() {
       .from('profiles')
       .select('id, full_name')
       .eq('role', 'employee')
-      .order('name')
+      .order('full_name')
     if (data) setEmployees(data)
   }
 
