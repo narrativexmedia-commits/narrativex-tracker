@@ -2,6 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
+function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000;
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+  const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 export async function POST(req: NextRequest) {
   const cookieStore = await cookies();
   const supabase = createServerClient(
@@ -26,27 +36,70 @@ export async function POST(req: NextRequest) {
 
   if (!employee) return NextResponse.json({ error: "Employee not found" }, { status: 404 });
 
-  const { data: setting } = await supabase
+  // Fetch all settings
+  const { data: settings } = await supabase
     .from("settings")
-    .select("value")
-    .eq("key", "allowed_ip")
-    .single();
+    .select("key, value");
 
-  if (!setting) return NextResponse.json({ error: "IP setting not configured" }, { status: 500 });
+  if (!settings) return NextResponse.json({ error: "Settings not configured" }, { status: 500 });
 
+  const getSetting = (key: string) => settings.find((s) => s.key === key)?.value;
+
+  const allowedIp = getSetting("allowed_ip");
+  const officeLat = parseFloat(getSetting("office_lat") ?? "0");
+  const officeLng = parseFloat(getSetting("office_lng") ?? "0");
+  const officeRadius = parseFloat(getSetting("office_radius") ?? "50");
+  const lateAfter = getSetting("late_after") ?? "09:30";
+
+  // Get request IP
   const forwarded = req.headers.get("x-forwarded-for");
   const realIp = req.headers.get("x-real-ip");
   const requestIp = forwarded ? forwarded.split(",")[0].trim() : realIp;
 
   const isDev = process.env.NODE_ENV === "development";
-  if (!isDev && requestIp !== setting.value) {
-    return NextResponse.json(
-      { error: "Access denied. You must be on the office network to clock in." },
-      { status: 403 }
-    );
+
+  let locationVerified = false;
+  let recordedLat: number | null = null;
+  let recordedLng: number | null = null;
+
+  if (isDev) {
+    // Skip all location checks in dev
+    locationVerified = true;
+  } else if (requestIp === allowedIp) {
+    // IP matches → allow directly
+    locationVerified = true;
+  } else {
+    // IP failed → check GPS
+    const body = await req.json().catch(() => ({}));
+    const { latitude, longitude } = body;
+
+    if (!latitude || !longitude) {
+      return NextResponse.json(
+        { error: "Not on office network. Please enable location access and try again." },
+        { status: 403 }
+      );
+    }
+
+    const distance = getDistanceMeters(latitude, longitude, officeLat, officeLng);
+
+    if (distance > officeRadius) {
+      return NextResponse.json(
+        { error: `You are ${Math.round(distance)}m away from office. Must be within ${officeRadius}m.` },
+        { status: 403 }
+      );
+    }
+
+    locationVerified = true;
+    recordedLat = latitude;
+    recordedLng = longitude;
+  }
+
+  if (!locationVerified) {
+    return NextResponse.json({ error: "Location verification failed." }, { status: 403 });
   }
 
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+
   const { data: existing } = await supabase
     .from("attendance")
     .select("*")
@@ -57,21 +110,20 @@ export async function POST(req: NextRequest) {
   if (existing) return NextResponse.json({ error: "Already clocked in today" }, { status: 400 });
 
   const now = new Date();
-  const { data: lateSettings } = await supabase
-  .from("settings")
-  .select("value")
-  .eq("key", "late_after")
-  .single();
-
-const lateAfter = lateSettings?.value ?? "09:30";
-const istTime = new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
-const isLate = istTime > lateAfter;
+  const istTime = now.toLocaleTimeString("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const isLate = istTime > lateAfter;
 
   const { error } = await supabase.from("attendance").insert({
     employee_id: employee.id,
     date: today,
     clock_in: now.toISOString(),
     ip_address: isDev ? "dev-localhost" : requestIp,
+    latitude: recordedLat,
+    longitude: recordedLng,
     status: isLate ? "late" : "present",
   });
 

@@ -26,27 +26,63 @@ export async function POST(req: NextRequest) {
 
   if (!employee) return NextResponse.json({ error: "Employee not found" }, { status: 404 });
 
-  const { data: setting } = await supabase
+  const { data: settings } = await supabase
     .from("settings")
-    .select("value")
-    .eq("key", "allowed_ip")
-    .single();
+    .select("key, value");
 
-  if (!setting) return NextResponse.json({ error: "IP setting not configured" }, { status: 500 });
+  if (!settings) return NextResponse.json({ error: "Settings not configured" }, { status: 500 });
+
+  const getSetting = (key: string) => settings.find((s) => s.key === key)?.value;
+
+  const allowedIp = getSetting("allowed_ip");
+  const officeLat = parseFloat(getSetting("office_lat") ?? "0");
+  const officeLng = parseFloat(getSetting("office_lng") ?? "0");
+  const officeRadius = parseFloat(getSetting("office_radius") ?? "50");
 
   const forwarded = req.headers.get("x-forwarded-for");
   const realIp = req.headers.get("x-real-ip");
   const requestIp = forwarded ? forwarded.split(",")[0].trim() : realIp;
 
   const isDev = process.env.NODE_ENV === "development";
-  if (!isDev && requestIp !== setting.value) {
-    return NextResponse.json(
-      { error: "Access denied. You must be on the office network to clock out." },
-      { status: 403 }
+
+  let locationVerified = false;
+
+  if (isDev) {
+    locationVerified = true;
+  } else if (requestIp === allowedIp) {
+    locationVerified = true;
+  } else {
+    const body = await req.json().catch(() => ({}));
+    const { latitude, longitude } = body;
+
+    if (!latitude || !longitude) {
+      return NextResponse.json(
+        { error: "Not on office network. Please enable location access and try again." },
+        { status: 403 }
+      );
+    }
+
+    const distance = Math.sqrt(
+      ((latitude - officeLat) * 111320) ** 2 +
+      ((longitude - officeLng) * 111320 * Math.cos((officeLat * Math.PI) / 180)) ** 2
     );
+
+    if (distance > officeRadius) {
+      return NextResponse.json(
+        { error: `You are ${Math.round(distance)}m away from office. Must be within ${officeRadius}m.` },
+        { status: 403 }
+      );
+    }
+
+    locationVerified = true;
+  }
+
+  if (!locationVerified) {
+    return NextResponse.json({ error: "Location verification failed." }, { status: 403 });
   }
 
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+
   const { data: existing } = await supabase
     .from("attendance")
     .select("*")
