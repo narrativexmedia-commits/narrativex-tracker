@@ -14,6 +14,7 @@ const navItems = [
   { label: 'Reports', href: '/admin/reports', icon: 'ti-file-analytics' },
   { label: 'Activity Flags', href: '/admin/activity-flags', icon: 'ti-flag' },
   { label: 'Settings', href: '/admin/settings', icon: 'ti-settings' },
+  { label: 'System Health', href: '/admin/system-health', icon: 'ti-heart-rate-monitor' },
 ]
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -35,68 +36,90 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     setSidebarOpen(false)
   }, [pathname])
 
-  const NavLinks = () => (
-    <>
-      <div style={{ fontSize: 10, color: d ? 'rgba(255,255,255,0.3)' : '#b0abc8', letterSpacing: '0.8px', padding: '8px 10px 4px', textTransform: 'uppercase' as const }}>
-        Main
-      </div>
-      {navItems.slice(0, 4).map(item => (
-        <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '9px 10px', borderRadius: 6, fontSize: 13,
-            marginBottom: 2, cursor: 'pointer',
-            background: pathname === item.href
-              ? d ? 'rgba(139,92,246,0.25)' : '#eeecff'
-              : 'transparent',
-            color: pathname === item.href
-              ? d ? '#c4b5fd' : '#4c3d9e'
-              : d ? 'rgba(255,255,255,0.5)' : '#6b648a',
-          }}>
-            <i className={`ti ${item.icon}`} aria-hidden="true" style={{ fontSize: 16 }} />
-            {item.label}
-          </div>
-        </Link>
-      ))}
-
-      <div style={{ fontSize: 10, color: d ? 'rgba(255,255,255,0.3)' : '#b0abc8', letterSpacing: '0.8px', padding: '8px 10px 4px', textTransform: 'uppercase' as const, marginTop: 4 }}>
-        Reports
-      </div>
-      {navItems.slice(4).map(item => (
-        <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '9px 10px', borderRadius: 6, fontSize: 13,
-            marginBottom: 2, cursor: 'pointer',
-            background: pathname === item.href
-              ? d ? 'rgba(139,92,246,0.25)' : '#eeecff'
-              : 'transparent',
-            color: pathname === item.href
-              ? d ? '#c4b5fd' : '#4c3d9e'
-              : d ? 'rgba(255,255,255,0.5)' : '#6b648a',
-          }}>
-            <i className={`ti ${item.icon}`} aria-hidden="true" style={{ fontSize: 16 }} />
-            {item.label}
-          </div>
-        </Link>
-      ))}
-
-      <div style={{ marginTop: 'auto', padding: '10px 0 0', borderTop: d ? '0.5px solid rgba(255,255,255,0.08)' : '0.5px solid #e5e3f0' }}>
-        <div
-          onClick={handleLogout}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '9px 10px', borderRadius: 6, fontSize: 13,
-            cursor: 'pointer',
-            color: d ? 'rgba(255,255,255,0.5)' : '#6b648a',
-          }}
-        >
-          <i className="ti ti-logout" aria-hidden="true" style={{ fontSize: 16 }} />
-          Logout
+ const NavLinks = () => (
+  <>
+    <div style={{ fontSize: 10, color: d ? 'rgba(255,255,255,0.3)' : '#b0abc8', letterSpacing: '0.8px', padding: '8px 10px 4px', textTransform: 'uppercase' as const }}>
+      Main
+    </div>
+    {navItems.slice(0, 4).map(item => (
+      <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '9px 10px', borderRadius: 6, fontSize: 13,
+          marginBottom: 2, cursor: 'pointer',
+          background: pathname === item.href
+            ? d ? 'rgba(139,92,246,0.25)' : '#eeecff'
+            : 'transparent',
+          color: pathname === item.href
+            ? d ? '#c4b5fd' : '#4c3d9e'
+            : d ? 'rgba(255,255,255,0.5)' : '#6b648a',
+        }}>
+          <i className={`ti ${item.icon}`} aria-hidden="true" style={{ fontSize: 16 }} />
+          {item.label}
         </div>
+      </Link>
+    ))}
+
+    <div style={{ fontSize: 10, color: d ? 'rgba(255,255,255,0.3)' : '#b0abc8', letterSpacing: '0.8px', padding: '8px 10px 4px', textTransform: 'uppercase' as const, marginTop: 4 }}>
+      Reports
+    </div>
+    {navItems.slice(4, 8).map(item => (
+      <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '9px 10px', borderRadius: 6, fontSize: 13,
+          marginBottom: 2, cursor: 'pointer',
+          background: pathname === item.href
+            ? d ? 'rgba(139,92,246,0.25)' : '#eeecff'
+            : 'transparent',
+          color: pathname === item.href
+            ? d ? '#c4b5fd' : '#4c3d9e'
+            : d ? 'rgba(255,255,255,0.5)' : '#6b648a',
+        }}>
+          <i className={`ti ${item.icon}`} aria-hidden="true" style={{ fontSize: 16 }} />
+          {item.label}
+        </div>
+      </Link>
+    ))}
+
+    <div style={{ fontSize: 10, color: d ? 'rgba(255,255,255,0.3)' : '#b0abc8', letterSpacing: '0.8px', padding: '8px 10px 4px', textTransform: 'uppercase' as const, marginTop: 4 }}>
+      System
+    </div>
+    {navItems.slice(8).map(item => (
+      <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '9px 10px', borderRadius: 6, fontSize: 13,
+          marginBottom: 2, cursor: 'pointer',
+          background: pathname === item.href
+            ? d ? 'rgba(139,92,246,0.25)' : '#eeecff'
+            : 'transparent',
+          color: pathname === item.href
+            ? d ? '#c4b5fd' : '#4c3d9e'
+            : d ? 'rgba(255,255,255,0.5)' : '#6b648a',
+        }}>
+          <i className={`ti ${item.icon}`} aria-hidden="true" style={{ fontSize: 16 }} />
+          {item.label}
+        </div>
+      </Link>
+    ))}
+
+    <div style={{ marginTop: 'auto', padding: '10px 0 0', borderTop: d ? '0.5px solid rgba(255,255,255,0.08)' : '0.5px solid #e5e3f0' }}>
+      <div
+        onClick={handleLogout}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '9px 10px', borderRadius: 6, fontSize: 13,
+          cursor: 'pointer',
+          color: d ? 'rgba(255,255,255,0.5)' : '#6b648a',
+        }}
+      >
+        <i className="ti ti-logout" aria-hidden="true" style={{ fontSize: 16 }} />
+        Logout
       </div>
-    </>
-  )
+    </div>
+  </>
+)
 
   const sidebarStyle: React.CSSProperties = {
     width: 210,
