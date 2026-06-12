@@ -69,17 +69,46 @@ export async function POST(req: NextRequest) {
     // IP matches → allow directly
     locationVerified = true;
   } else {
-    // IP failed → check GPS
-    const body = await req.json().catch(() => ({}));
-    const { latitude, longitude } = body;
+   // IP failed → check GPS
+const body = await req.json().catch(() => ({}));
+const { latitude, longitude, accuracy } = body;
 
-    if (!latitude || !longitude) {
-      return NextResponse.json(
-        { error: "Not on office network. Please enable location access and try again." },
-        { status: 403 }
-      );
-    }
+// Validate coords exist
+if (!latitude || !longitude) {
+  return NextResponse.json(
+    { error: "Not on office network. Please enable location access and try again." },
+    { status: 403 }
+  );
+}
 
+// Reject low accuracy (spoofed/manual coords have no real accuracy)
+if (!accuracy || accuracy > 100) {
+  return NextResponse.json(
+    { error: "GPS accuracy too low. Move to open area and try again." },
+    { status: 403 }
+  );
+}
+
+// Validate coords are within India bounds
+if (latitude < 6 || latitude > 37 || longitude < 68 || longitude > 98) {
+  return NextResponse.json(
+    { error: "Location outside valid range." },
+    { status: 403 }
+  );
+}
+
+// Reject suspiciously exact coords (within 1 meter of office — likely hardcoded)
+const suspiciouslyExact = 
+  Math.abs(latitude - officeLat) < 0.00001 && 
+  Math.abs(longitude - officeLng) < 0.00001;
+if (suspiciouslyExact) {
+  return NextResponse.json(
+    { error: "Invalid location data." },
+    { status: 403 }
+  );
+}
+
+    
     const distance = getDistanceMeters(latitude, longitude, officeLat, officeLng);
 
     if (distance > officeRadius) {

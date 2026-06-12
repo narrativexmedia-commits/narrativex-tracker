@@ -37,16 +37,20 @@ export default function EmployeeDashboard() {
     setLoading(false);
   }
 
-  async function getLocation(): Promise<{ latitude: number; longitude: number } | null> {
-    return new Promise((resolve) => {
-      if (!navigator.geolocation) { resolve(null); return; }
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-        () => resolve(null),
-        { timeout: 10000 }
-      );
-    });
-  }
+  async function getLocation(): Promise<{ latitude: number; longitude: number; accuracy: number } | null> {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) { resolve(null); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ 
+        latitude: pos.coords.latitude, 
+        longitude: pos.coords.longitude,
+        accuracy: pos.coords.accuracy  // add this
+      }),
+      () => resolve(null),
+      { timeout: 10000, enableHighAccuracy: true }  // add enableHighAccuracy
+    );
+  });
+}
 
   async function handleClockIn() {
     setActionLoading(true); setMessage(null);
