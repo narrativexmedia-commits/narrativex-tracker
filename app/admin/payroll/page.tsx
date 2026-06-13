@@ -275,36 +275,36 @@ export default function PayrollPage() {
       .gte('date', `${filterYear}-${monthStr}-01`)
       .lt('date', `${nextYear}-${nextMonthStr}-01`);
 
-    const attendanceMap: Record<string, { present: number; cl: number; }> = {};
-    (attendance ?? []).forEach((a: { employee_id: string; status: string }) => {
-      if (!attendanceMap[a.employee_id]) attendanceMap[a.employee_id] = { present: 0, cl: 0 };
-      if (a.status === 'present' || a.status === 'late') attendanceMap[a.employee_id].present++;
-      if (a.status === 'cl') attendanceMap[a.employee_id].cl++;
-    });
+    const attendanceMap: Record<string, { present: number }> = {};
+(attendance ?? []).forEach((a: { employee_id: string; status: string }) => {
+  if (!attendanceMap[a.employee_id]) attendanceMap[a.employee_id] = { present: 0 };
+  if (a.status === 'present' || a.status === 'late') attendanceMap[a.employee_id].present++;
+});
 
     const records = (employees as Employee[]).map(emp => {
-      const att = attendanceMap[emp.id] ?? { present: 0, cl: 0 };
+      const att = attendanceMap[emp.id] ?? { present: 0 };
       const presentDays = att.present;
-      const clDays = att.cl;
       let daysToPayFor = workingDays;
-      if (emp.exit_date) {
-        const exit = new Date(emp.exit_date);
-        const exitMonth = exit.getMonth() + 1;
-        const exitYear = exit.getFullYear();
-        if (exitMonth === filterMonth && exitYear === filterYear) {
-          let count = 0;
-          for (let d = 1; d <= exit.getDate(); d++) {
-            const date = new Date(filterYear, filterMonth - 1, d);
-            if (date.getDay() === 0) continue;
-            const dateStr = `${filterYear}-${String(filterMonth).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-            if (holidayDates.includes(dateStr)) continue;
-            count++;
-          }
-          daysToPayFor = count;
-        }
-      }
-      const absentDays = Math.max(0, daysToPayFor - presentDays - clDays);
-      const lopDays = Math.max(0, absentDays - clDays);
+if (emp.exit_date) {
+  const exit = new Date(emp.exit_date);
+  const exitMonth = exit.getMonth() + 1;
+  const exitYear = exit.getFullYear();
+  if (exitMonth === filterMonth && exitYear === filterYear) {
+    let count = 0;
+    for (let d = 1; d <= exit.getDate(); d++) {
+      const date = new Date(filterYear, filterMonth - 1, d);
+      if (date.getDay() === 0) continue;
+      const dateStr = `${filterYear}-${String(filterMonth).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      if (holidayDates.includes(dateStr)) continue;
+      count++;
+    }
+    daysToPayFor = count;
+  }
+}
+    const allAbsent = Math.max(0, daysToPayFor - presentDays);
+    const clDays = Math.min(2, allAbsent);
+    const lopDays = Math.max(0, allAbsent - 2); // 3rd+ = LOP (pay cut)
+    const absentDays = allAbsent;
       const perDay = workingDays > 0 ? emp.salary / workingDays : 0;
       const earnedPay = parseFloat((perDay * daysToPayFor).toFixed(2));
       const deduction = parseFloat((perDay * lopDays).toFixed(2));
