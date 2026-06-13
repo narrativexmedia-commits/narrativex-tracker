@@ -377,10 +377,13 @@ if (emp.exit_date) {
 
   async function handleRefresh() {
     setMessage(null);
+    setLoading(true);
     let delQuery = supabase.from('payroll').delete()
       .eq('month', filterMonth).eq('year', filterYear).eq('status', 'draft');
     if (filterEmployee !== 'all') delQuery = delQuery.eq('employee_id', filterEmployee);
-    await delQuery;
+    const { error } = await delQuery;
+    if (error) { setMessage({ type: 'error', text: error.message }); setLoading(false); return; }
+    setMessage({ type: 'success', text: 'Drafts cleared.' });
     fetchPayroll();
   }
 
