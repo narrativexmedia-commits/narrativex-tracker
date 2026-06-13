@@ -15,6 +15,7 @@ const navItems = [
   { label: 'Activity Flags', href: '/admin/activity-flags', icon: 'ti-flag' },
   { label: 'Settings', href: '/admin/settings', icon: 'ti-settings' },
   { label: 'System Health', href: '/admin/system-health', icon: 'ti-heart-rate-monitor' },
+  {  label: "Archive", href: "/admin/archive", icon: "ti-archive"},
 ]
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
