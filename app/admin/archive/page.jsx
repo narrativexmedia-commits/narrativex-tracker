@@ -132,16 +132,19 @@ export default function ArchivePage() {
     setDeleteLoading(true);
     setShowDeleteConfirm(false);
     try {
-      const [a, b, c] = await Promise.all([
-        supabase.from("attendance").delete().gte("date", fromDate).lte("date", toDate),
-        supabase.from("agent_logs").delete().gte("ts", `${fromDate}T00:00:00`).lte("ts", `${toDate}T23:59:59`),
-        supabase.from("activity_flags").delete().gte("created_at", `${fromDate}T00:00:00`).lte("created_at", `${toDate}T23:59:59`),
-      ]);
-
-      if (a.error) throw a.error;
-      if (b.error) throw b.error;
-      if (c.error) throw c.error;
-
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/archive-delete`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ fromDate, toDate }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
       showToast(`Deleted data from ${formatDate(fromDate)} to ${formatDate(toDate)}.`);
     } catch (err) {
       console.error(err);
