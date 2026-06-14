@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -25,7 +25,7 @@ type PayrollRow = {
   deduction: number;
   net_pay: number;
   status: 'draft' | 'approved' | 'paid';
-  employee: { full_name: string; department: string; };
+  employee: { full_name: string; department: string };
 };
 
 type Employee = {
@@ -36,17 +36,25 @@ type Employee = {
   exit_date: string | null;
 };
 
-const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+type Tab = 'draft' | 'approved' | 'paid';
+
+const months = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December',
+];
 const now = new Date();
 const currentMonth = now.getMonth() + 1;
 const currentYear = now.getFullYear();
 
 function fmt(n: number) {
-  return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+  return new Intl.NumberFormat('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n);
 }
 
 function exportCSV(rows: PayrollRow[], month: number, year: number) {
-  const headers = ['Employee', 'Working Days', 'Present', 'Absent', 'CL', 'LOP', 'Gross', 'Deduction', 'Net Pay', 'Status'];
+  const headers = ['Employee','Working Days','Present','Absent','CL','LOP','Gross','Deduction','Net Pay','Status'];
   const data = rows.map(r => [
     r.employee?.full_name ?? '',
     r.working_days, r.present_days, r.absent_days, r.cl_days, r.lop_days,
@@ -63,7 +71,7 @@ function exportCSV(rows: PayrollRow[], month: number, year: number) {
 }
 
 function exportExcel(rows: PayrollRow[], month: number, year: number) {
-  const headers = ['Employee', 'Working Days', 'Present', 'Absent', 'CL', 'LOP', 'Gross (₹)', 'Deduction (₹)', 'Net Pay (₹)', 'Status'];
+  const headers = ['Employee','Working Days','Present','Absent','CL','LOP','Gross (₹)','Deduction (₹)','Net Pay (₹)','Status'];
   const data = rows.map(r => [
     r.employee?.full_name ?? '',
     r.working_days, r.present_days, r.absent_days, r.cl_days, r.lop_days,
@@ -84,14 +92,14 @@ function exportPDF(rows: PayrollRow[], month: number, year: number) {
   doc.text(`Generated: ${new Date().toLocaleDateString('en-IN')}`, 14, 23);
   autoTable(doc, {
     startY: 28,
-    head: [['Employee', 'Working Days', 'Present', 'Absent', 'CL', 'LOP', 'Gross (₹)', 'Deduction (₹)', 'Net Pay (₹)', 'Status']],
+    head: [['Employee','Working Days','Present','Absent','CL','LOP','Gross (₹)','Deduction (₹)','Net Pay (₹)','Status']],
     body: rows.map(r => [
       r.employee?.full_name ?? '',
       r.working_days, r.present_days, r.absent_days, r.cl_days, r.lop_days,
       fmt(r.gross_salary), fmt(r.deduction), fmt(r.net_pay), r.status,
     ]),
     foot: [[
-      'Total', '', '', '', '', '',
+      'Total','','','','','',
       fmt(rows.reduce((s, r) => s + r.gross_salary, 0)),
       fmt(rows.reduce((s, r) => s + r.deduction, 0)),
       fmt(rows.reduce((s, r) => s + r.net_pay, 0)),
@@ -109,9 +117,7 @@ function generatePayslip(row: PayrollRow) {
   const perDay = (row.gross_salary / row.working_days).toFixed(2);
   const monthName = months[row.month - 1];
   const html = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8"/>
+<html><head><meta charset="utf-8"/>
 <title>Payslip - ${monthName} ${row.year}</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -129,9 +135,7 @@ td:last-child{text-align:right;font-weight:500;}
 .net td{background:#f5f0ff;font-weight:700;font-size:14px;color:#7c3aed;border-bottom:none;}
 .badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600;}
 .footer{margin-top:32px;font-size:11px;color:#aaa;text-align:center;}
-</style>
-</head>
-<body>
+</style></head><body>
 <div class="header">
   <div class="company">NarrativeX Media</div>
   <div class="subtitle">Payslip &#8212; ${monthName} ${row.year}</div>
@@ -157,8 +161,7 @@ td:last-child{text-align:right;font-weight:500;}
   <tr class="net"><td>Net Pay</td><td>&#8377;${fmt(row.net_pay)}</td></tr>
 </table>
 <div class="footer">Generated on ${new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })} &#183; NarrativeX Media</div>
-</body>
-</html>`;
+</body></html>`;
   const blob = new Blob([html], { type: 'text/html' });
   const url = URL.createObjectURL(blob);
   const win = window.open(url, '_blank');
@@ -172,440 +175,610 @@ function getWorkingDays(year: number, month: number, holidays: string[]): number
   for (let d = 1; d <= daysInMonth; d++) {
     const date = new Date(year, month - 1, d);
     if (date.getDay() === 0) continue;
-    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     if (holidaySet.has(dateStr)) continue;
     count++;
   }
   return count;
 }
 
+const Spinner = () => (
+  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+  </svg>
+);
+
+function ExportButtons({ rows, month, year }: { rows: PayrollRow[]; month: number; year: number }) {
+  const btnCls = 'flex items-center gap-1.5 h-8 px-3 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-xs font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors';
+  return (
+    <div className="flex gap-2">
+      <button onClick={() => exportCSV(rows, month, year)} className={btnCls}><i className="ti ti-download text-xs" /> CSV</button>
+      <button onClick={() => exportExcel(rows, month, year)} className={btnCls}><i className="ti ti-download text-xs" /> Excel</button>
+      <button onClick={() => exportPDF(rows, month, year)} className={btnCls}><i className="ti ti-download text-xs" /> PDF</button>
+    </div>
+  );
+}
+
+function EmptyState({ icon, text }: { icon: string; text: string }) {
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 py-16 text-center">
+      <i className={`ti ${icon} text-3xl text-gray-300 dark:text-gray-600 mb-2 block`} />
+      <p className="text-sm text-gray-400 dark:text-gray-500">{text}</p>
+    </div>
+  );
+}
+
 export default function PayrollPage() {
+  const [activeTab, setActiveTab] = useState<Tab>('draft');
   const [filterMonth, setFilterMonth] = useState(currentMonth);
   const [filterYear, setFilterYear] = useState(currentYear);
-  const [filterEmployee, setFilterEmployee] = useState<string>('all');
   const [activeEmployees, setActiveEmployees] = useState<Employee[]>([]);
-  const [payrollRows, setPayrollRows] = useState<PayrollRow[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [allPayrollRows, setAllPayrollRows] = useState<PayrollRow[]>([]);
+  const [selectedTableIds, setSelectedTableIds] = useState<Set<string>>(new Set());
+  const [selectedEmpIds, setSelectedEmpIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [approving, setApproving] = useState(false);
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ ids: string[]; label: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const years = [currentYear - 1, currentYear, currentYear + 1];
 
+  // ─── Derived state ────────────────────────────────────────────────────────
+  const draftRows    = useMemo(() => allPayrollRows.filter(r => r.status === 'draft'),    [allPayrollRows]);
+  const approvedRows = useMemo(() => allPayrollRows.filter(r => r.status === 'approved'), [allPayrollRows]);
+  const paidRows     = useMemo(() => allPayrollRows.filter(r => r.status === 'paid'),     [allPayrollRows]);
+
+  const employeesWithRecord    = useMemo(() => new Set(allPayrollRows.map(r => r.employee_id)), [allPayrollRows]);
+  const employeesWithoutRecord = useMemo(() => activeEmployees.filter(e => !employeesWithRecord.has(e.id)), [activeEmployees, employeesWithRecord]);
+
+  const currentTabRows = activeTab === 'draft' ? draftRows : activeTab === 'approved' ? approvedRows : paidRows;
+  const currentTabSelectedIds = currentTabRows.map(r => r.id).filter(id => selectedTableIds.has(id));
+
+  // ─── Data fetching ────────────────────────────────────────────────────────
   useEffect(() => {
-    supabase.from('employees').select('id, full_name, salary, is_active, exit_date')
+    supabase.from('employees')
+      .select('id, full_name, salary, is_active, exit_date')
       .eq('is_active', true).order('full_name')
       .then(({ data }) => setActiveEmployees(data ?? []));
   }, []);
 
   const fetchPayroll = useCallback(async () => {
     setLoading(true);
-    let query = supabase
+    const { data, error } = await supabase
       .from('payroll')
       .select('*, employee:employees!payroll_employee_id_fkey(full_name, department)')
       .eq('month', filterMonth)
-      .eq('year', filterYear);
-    if (filterEmployee !== 'all') query = query.eq('employee_id', filterEmployee);
-    const { data, error } = await query.order('employee(full_name)', { ascending: true });
-    if (!error && data) setPayrollRows(data as unknown as PayrollRow[]);
-    else setPayrollRows([]);
-    setSelectedIds(new Set());
+      .eq('year', filterYear)
+      .order('employee(full_name)', { ascending: true });
+    if (!error && data) setAllPayrollRows(data as unknown as PayrollRow[]);
+    else setAllPayrollRows([]);
+    setSelectedTableIds(new Set());
+    setSelectedEmpIds(new Set());
     setLoading(false);
-  }, [filterMonth, filterYear, filterEmployee]);
+  }, [filterMonth, filterYear]);
 
   useEffect(() => { fetchPayroll(); }, [fetchPayroll]);
 
+  // ─── Actions ──────────────────────────────────────────────────────────────
   async function handleGenerate() {
+    if (selectedEmpIds.size === 0) {
+      setMessage({ type: 'error', text: 'Select at least one employee to generate payroll.' });
+      return;
+    }
     setMessage(null);
     setGenerating(true);
 
-    const { data: existing } = await supabase
-      .from('payroll')
-      .select('id, status, employee_id')
-      .eq('month', filterMonth)
-      .eq('year', filterYear);
+    const empIds = [...selectedEmpIds];
+    const empsToProcess = activeEmployees.filter(e => empIds.includes(e.id));
 
-    if (existing && existing.length > 0) {
-      const relevant = filterEmployee === 'all'
-        ? existing
-        : existing.filter(r => r.employee_id === filterEmployee);
-      const hasLocked = relevant.some(r => r.status === 'approved' || r.status === 'paid');
-      if (hasLocked) {
-        setMessage({ type: 'error', text: 'Payroll already approved or paid. Cannot regenerate.' });
-        setGenerating(false);
-        return;
-      }
-      let delQuery = supabase.from('payroll').delete()
-        .eq('month', filterMonth).eq('year', filterYear).eq('status', 'draft');
-      if (filterEmployee !== 'all') delQuery = delQuery.eq('employee_id', filterEmployee);
-      await delQuery;
-    }
-
-    let empQuery = supabase
-      .from('employees')
-      .select('id, full_name, salary, is_active, exit_date')
-      .eq('is_active', true);
-    if (filterEmployee !== 'all') empQuery = empQuery.eq('id', filterEmployee);
-    const { data: employees } = await empQuery;
-
-    if (!employees || employees.length === 0) {
-      setMessage({ type: 'error', text: 'No active employees found.' });
-      setGenerating(false);
-      return;
-    }
-
-    const monthStr = String(filterMonth).padStart(2, '0');
-    const nextMonth = filterMonth === 12 ? 1 : filterMonth + 1;
-    const nextYear = filterMonth === 12 ? filterYear + 1 : filterYear;
+    const monthStr   = String(filterMonth).padStart(2, '0');
+    const nextMonth  = filterMonth === 12 ? 1 : filterMonth + 1;
+    const nextYear   = filterMonth === 12 ? filterYear + 1 : filterYear;
     const nextMonthStr = String(nextMonth).padStart(2, '0');
 
     const { data: holidays } = await supabase
-      .from('holidays')
-      .select('date')
+      .from('holidays').select('date')
       .gte('date', `${filterYear}-${monthStr}-01`)
       .lt('date', `${nextYear}-${nextMonthStr}-01`);
 
-    const holidayDates = (holidays ?? []).map((h: { date: string }) => h.date);
-    const workingDays = getWorkingDays(filterYear, filterMonth, holidayDates);
+    const holidayDates  = (holidays ?? []).map(h => h.date);
+    const daysToPayFor  = getWorkingDays(filterYear, filterMonth, holidayDates);
 
-    const { data: attendance } = await supabase
-      .from('attendance')
-      .select('employee_id, status')
-      .gte('date', `${filterYear}-${monthStr}-01`)
-      .lt('date', `${nextYear}-${nextMonthStr}-01`);
+    const records = await Promise.all(empsToProcess.map(async (emp) => {
+      const { data: attRows } = await supabase
+        .from('attendance').select('date, status')
+        .eq('employee_id', emp.id)
+        .gte('date', `${filterYear}-${monthStr}-01`)
+        .lt('date', `${nextYear}-${nextMonthStr}-01`);
 
-    const attendanceMap: Record<string, { present: number }> = {};
-(attendance ?? []).forEach((a: { employee_id: string; status: string }) => {
-  if (!attendanceMap[a.employee_id]) attendanceMap[a.employee_id] = { present: 0 };
-  if (a.status === 'present' || a.status === 'late') attendanceMap[a.employee_id].present++;
-});
+      const att         = attRows ?? [];
+      const presentDays = att.filter(a => a.status === 'present' || a.status === 'late').length;
+      const absentDays  = att.filter(a => a.status === 'absent').length;
+      const clDays      = Math.min(2, absentDays);
+      const lopDays     = Math.max(0, absentDays - clDays);
 
-    const records = (employees as Employee[]).map(emp => {
-      const att = attendanceMap[emp.id] ?? { present: 0 };
-      const presentDays = att.present;
-      let daysToPayFor = workingDays;
-if (emp.exit_date) {
-  const exit = new Date(emp.exit_date);
-  const exitMonth = exit.getMonth() + 1;
-  const exitYear = exit.getFullYear();
-  if (exitMonth === filterMonth && exitYear === filterYear) {
-    let count = 0;
-    for (let d = 1; d <= exit.getDate(); d++) {
-      const date = new Date(filterYear, filterMonth - 1, d);
-      if (date.getDay() === 0) continue;
-      const dateStr = `${filterYear}-${String(filterMonth).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-      if (holidayDates.includes(dateStr)) continue;
-      count++;
-    }
-    daysToPayFor = count;
-  }
-}
-    const allAbsent = Math.max(0, daysToPayFor - presentDays);
-    const clDays = Math.min(2, allAbsent);
-    const lopDays = Math.max(0, allAbsent - 2); // 3rd+ = LOP (pay cut)
-    const absentDays = allAbsent;
-      const perDay = workingDays > 0 ? emp.salary / workingDays : 0;
+      const perDay    = emp.salary > 0 ? emp.salary / daysToPayFor : 0;
       const earnedPay = parseFloat((perDay * daysToPayFor).toFixed(2));
       const deduction = parseFloat((perDay * lopDays).toFixed(2));
-      const netPay = parseFloat((earnedPay - deduction).toFixed(2));
+      const netPay    = parseFloat((earnedPay - deduction).toFixed(2));
+
       return {
-        employee_id: emp.id,
-        month: filterMonth,
-        year: filterYear,
+        employee_id:  emp.id,
+        month:        filterMonth,
+        year:         filterYear,
         working_days: daysToPayFor,
         present_days: presentDays,
-        absent_days: absentDays,
-        cl_days: clDays,
-        lop_days: lopDays,
+        absent_days:  absentDays,
+        cl_days:      clDays,
+        lop_days:     lopDays,
         gross_salary: emp.salary,
         deduction,
-        net_pay: netPay,
-        status: 'draft',
+        net_pay:      netPay,
+        status:       'draft',
       };
-    });
+    }));
 
     const { error: insertError } = await supabase.from('payroll').insert(records);
     setGenerating(false);
     if (insertError) { setMessage({ type: 'error', text: insertError.message }); return; }
-    setMessage({ type: 'success', text: `Payroll generated for ${months[filterMonth - 1]} ${filterYear}.` });
+    setMessage({ type: 'success', text: `Payroll draft generated for ${records.length} employee(s).` });
+    setSelectedEmpIds(new Set());
     fetchPayroll();
   }
 
-  async function handleApproveAll() {
-    setApproving(true);
-    setMessage(null);
-    const ids = payrollRows.filter(r => r.status === 'draft').map(r => r.id);
-    if (ids.length === 0) { setApproving(false); return; }
-    const { error } = await supabase
-      .from('payroll')
+  async function handleDelete(ids: string[]) {
+    setDeleting(true);
+    const { error } = await supabase.from('payroll').delete().in('id', ids);
+    setDeleting(false);
+    setDeleteConfirm(null);
+    if (error) { setMessage({ type: 'error', text: error.message }); return; }
+    setMessage({ type: 'success', text: `${ids.length} record(s) deleted.` });
+    fetchPayroll();
+  }
+
+  async function handleApprove(ids: string[]) {
+    const { error } = await supabase.from('payroll')
       .update({ status: 'approved', approved_at: new Date().toISOString() })
       .in('id', ids);
-    setApproving(false);
     if (error) { setMessage({ type: 'error', text: error.message }); return; }
-    setMessage({ type: 'success', text: 'All drafts approved.' });
+    setMessage({ type: 'success', text: `${ids.length} record(s) approved.` });
     fetchPayroll();
   }
 
-  async function handleApproveSelected() {
-    setApproving(true);
-    setMessage(null);
-    const ids = [...selectedIds].filter(id => payrollRows.find(r => r.id === id && r.status === 'draft'));
-    if (ids.length === 0) { setApproving(false); return; }
-    const { error } = await supabase
-      .from('payroll')
-      .update({ status: 'approved', approved_at: new Date().toISOString() })
-      .in('id', ids);
-    setApproving(false);
-    if (error) { setMessage({ type: 'error', text: error.message }); return; }
-    setMessage({ type: 'success', text: `${ids.length} employee(s) approved.` });
-    fetchPayroll();
-  }
-
-  async function handleMarkPaid() {
-    setMessage(null);
-    const ids = payrollRows.filter(r => r.status === 'approved').map(r => r.id);
-    if (ids.length === 0) return;
-    const { error } = await supabase
-      .from('payroll')
+  async function handleMarkPaid(ids: string[]) {
+    const { error } = await supabase.from('payroll')
       .update({ status: 'paid', paid_at: new Date().toISOString() })
       .in('id', ids);
     if (error) { setMessage({ type: 'error', text: error.message }); return; }
-    setMessage({ type: 'success', text: 'Payroll marked as paid.' });
+    setMessage({ type: 'success', text: `${ids.length} record(s) marked as paid.` });
     fetchPayroll();
   }
 
-  async function handleRefresh() {
-    setMessage(null);
-    setLoading(true);
-    let delQuery = supabase.from('payroll').delete()
-      .eq('month', filterMonth).eq('year', filterYear).eq('status', 'draft');
-    if (filterEmployee !== 'all') delQuery = delQuery.eq('employee_id', filterEmployee);
-    const { error } = await delQuery;
-    if (error) { setMessage({ type: 'error', text: error.message }); setLoading(false); return; }
-    setMessage({ type: 'success', text: 'Drafts cleared.' });
-    fetchPayroll();
+  // ─── Selection helpers ────────────────────────────────────────────────────
+  function toggleSelectAll(rows: PayrollRow[]) {
+    const ids       = rows.map(r => r.id);
+    const allChosen = ids.length > 0 && ids.every(id => selectedTableIds.has(id));
+    setSelectedTableIds(prev => {
+      const next = new Set(prev);
+      if (allChosen) ids.forEach(id => next.delete(id));
+      else           ids.forEach(id => next.add(id));
+      return next;
+    });
   }
 
-  const draftRows = payrollRows.filter(r => r.status === 'draft');
-  const isDraft = payrollRows.length > 0 && payrollRows.every(r => r.status === 'draft');
-  const isApproved = payrollRows.length > 0 && payrollRows.every(r => r.status === 'approved');
-  const isPaid = payrollRows.length > 0 && payrollRows.every(r => r.status === 'paid');
-  const hasRows = payrollRows.length > 0;
-  const hasDrafts = draftRows.length > 0;
+  function toggleRow(id: string) {
+    setSelectedTableIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
 
-  const statusColor: Record<string, string> = {
-    draft: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
-    approved: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
-    paid: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
-  };
+  function toggleEmpSelect(id: string) {
+    setSelectedEmpIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
 
-  const spinnerSVG = (
-    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-    </svg>
-  );
+  function toggleAllEmps() {
+    if (selectedEmpIds.size === employeesWithoutRecord.length) setSelectedEmpIds(new Set());
+    else setSelectedEmpIds(new Set(employeesWithoutRecord.map(e => e.id)));
+  }
 
+  // ─── Shared table columns ─────────────────────────────────────────────────
+  const COL_HEADERS = ['Employee','Working Days','Present','Absent','CL','LOP','Gross','Deduction','Net Pay'];
+
+  function TableHeader({ rows, showCheckbox = true }: { rows: PayrollRow[]; showCheckbox?: boolean }) {
+    return (
+      <thead>
+        <tr className="bg-gray-50 dark:bg-gray-700/40 border-b border-gray-100 dark:border-gray-700">
+          {showCheckbox && (
+            <th className="w-10 px-4 py-3">
+              <input
+                type="checkbox"
+                checked={rows.length > 0 && rows.every(r => selectedTableIds.has(r.id))}
+                onChange={() => toggleSelectAll(rows)}
+                className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+              />
+            </th>
+          )}
+          {COL_HEADERS.map(h => (
+            <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+          ))}
+          <th className="px-4 py-3 w-20" />
+        </tr>
+      </thead>
+    );
+  }
+
+  function TableRow({ row, showCheckbox = true, showDelete = true }: { row: PayrollRow; showCheckbox?: boolean; showDelete?: boolean }) {
+    const selected = selectedTableIds.has(row.id);
+    return (
+      <tr className={`transition-colors ${selected ? 'bg-purple-50 dark:bg-purple-900/10' : 'hover:bg-gray-50 dark:hover:bg-gray-700/20'}`}>
+        {showCheckbox && (
+          <td className="px-4 py-3">
+            <input type="checkbox" checked={selected} onChange={() => toggleRow(row.id)}
+              className="rounded border-gray-300 text-purple-600 focus:ring-purple-500" />
+          </td>
+        )}
+        <td className="px-4 py-3 font-medium text-gray-900 dark:text-white whitespace-nowrap">{row.employee?.full_name ?? '—'}</td>
+        <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.working_days}</td>
+        <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.present_days}</td>
+        <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.absent_days}</td>
+        <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.cl_days}</td>
+        <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.lop_days}</td>
+        <td className="px-4 py-3 text-gray-900 dark:text-white font-medium whitespace-nowrap">₹{fmt(row.gross_salary)}</td>
+        <td className="px-4 py-3 text-red-600 dark:text-red-400 font-medium whitespace-nowrap">−₹{fmt(row.deduction)}</td>
+        <td className="px-4 py-3 text-gray-900 dark:text-white font-semibold whitespace-nowrap">₹{fmt(row.net_pay)}</td>
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-0.5">
+            <button onClick={() => generatePayslip(row)} title="Payslip"
+              className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors">
+              <i className="ti ti-file-invoice text-base" />
+            </button>
+            {showDelete && (
+              <button
+                onClick={() => setDeleteConfirm({ ids: [row.id], label: `${row.employee?.full_name ?? 'this employee'}'s record` })}
+                title="Delete"
+                className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                <i className="ti ti-trash text-base" />
+              </button>
+            )}
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  function TableFooter({ rows, colSpan }: { rows: PayrollRow[]; colSpan: number }) {
+    return (
+      <tfoot>
+        <tr className="bg-gray-50 dark:bg-gray-700/40 border-t border-gray-200 dark:border-gray-700 font-semibold text-sm">
+          <td colSpan={colSpan} className="px-4 py-3 text-gray-700 dark:text-gray-200">Total</td>
+          <td className="px-4 py-3 text-gray-900 dark:text-white whitespace-nowrap">₹{fmt(rows.reduce((s, r) => s + r.gross_salary, 0))}</td>
+          <td className="px-4 py-3 text-red-600 dark:text-red-400 whitespace-nowrap">−₹{fmt(rows.reduce((s, r) => s + r.deduction, 0))}</td>
+          <td className="px-4 py-3 text-gray-900 dark:text-white whitespace-nowrap">₹{fmt(rows.reduce((s, r) => s + r.net_pay, 0))}</td>
+          <td />
+        </tr>
+      </tfoot>
+    );
+  }
+
+  const tabs: { key: Tab; label: string; count: number }[] = [
+    { key: 'draft',    label: 'Drafts',           count: draftRows.length },
+    { key: 'approved', label: 'Approved Payroll',  count: approvedRows.length },
+    { key: 'paid',     label: 'Marked as Paid',    count: paidRows.length },
+  ];
+
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-5 max-w-7xl mx-auto">
+
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Payroll</h1>
+          <h1 className="text-xl font-bold text-gray-900 dark:text-white">Payroll</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-            {payrollRows.length > 0 ? `${payrollRows.length} employees` : 'No payroll generated yet'}
+            {months[filterMonth - 1]} {filterYear}
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {/* Approve Selected */}
-          {selectedIds.size > 0 && (
-            <button onClick={handleApproveSelected} disabled={approving}
-              className="flex items-center gap-2 h-9 px-4 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white text-sm font-medium transition-colors">
-              {approving ? spinnerSVG : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              )}
-              Approve Selected ({selectedIds.size})
-            </button>
-          )}
-          {/* Approve All */}
-          {isDraft && (
-            <button onClick={handleApproveAll} disabled={approving}
-              className="flex items-center gap-2 h-9 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-medium transition-colors">
-              {approving ? spinnerSVG : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              )}
-              Approve All
-            </button>
-          )}
-          {/* Mark Paid */}
-          {isApproved && (
-            <button onClick={handleMarkPaid}
-              className="flex items-center gap-2 h-9 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-              Mark as Paid
-            </button>
-          )}
-          {/* Generate */}
-          <button onClick={handleGenerate} disabled={generating || isPaid}
-            className="flex items-center gap-2 h-9 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-medium transition-colors">
-            {generating ? spinnerSVG : (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            )}
-            Generate Payroll
-          </button>
-          {/* Exports */}
-          {hasRows && (
-            <div className="flex gap-2">
-              <button onClick={() => exportCSV(payrollRows, filterMonth, filterYear)}
-                className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                CSV
-              </button>
-              <button onClick={() => exportExcel(payrollRows, filterMonth, filterYear)}
-                className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Excel
-              </button>
-              <button onClick={() => exportPDF(payrollRows, filterMonth, filterYear)}
-                className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                PDF
-              </button>
-            </div>
-          )}
+          <select
+            value={filterMonth}
+            onChange={e => { setFilterMonth(Number(e.target.value)); setActiveTab('draft'); }}
+            className="h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+          >
+            {months.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+          </select>
+          <select
+            value={filterYear}
+            onChange={e => { setFilterYear(Number(e.target.value)); setActiveTab('draft'); }}
+            className="h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+          >
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
         </div>
       </div>
 
-      {/* Message */}
+      {/* Message banner */}
       {message && (
-        <div className={`px-4 py-3 rounded-lg text-sm ${message.type === 'error' ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400' : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'}`}>
+        <div className={`px-4 py-3 rounded-lg text-sm flex items-center gap-2 ${
+          message.type === 'error'
+            ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800'
+            : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
+        }`}>
+          <i className={`ti ${message.type === 'error' ? 'ti-alert-circle' : 'ti-circle-check'} text-base`} />
           {message.text}
+          <button onClick={() => setMessage(null)} className="ml-auto opacity-60 hover:opacity-100">
+            <i className="ti ti-x text-sm" />
+          </button>
         </div>
       )}
 
-      {/* Filters */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-        <div className="flex flex-wrap gap-3 items-end">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Month</label>
-            <select value={filterMonth} onChange={e => setFilterMonth(Number(e.target.value))}
-              className="h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[140px]">
-              {months.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-            </select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Year</label>
-            <select value={filterYear} onChange={e => setFilterYear(Number(e.target.value))}
-              className="h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-              {years.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Employee</label>
-            <select value={filterEmployee} onChange={e => setFilterEmployee(e.target.value)}
-              className="h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[160px]">
-              <option value="all">All Employees</option>
-              {activeEmployees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
-            </select>
-          </div>
-          {hasDrafts && (
-            <button onClick={handleRefresh}
-              className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-              Refresh
-            </button>
-          )}
-        </div>
+      {/* Tabs */}
+      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800/60 p-1 rounded-xl w-fit">
+        {tabs.map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => { setActiveTab(tab.key); setSelectedTableIds(new Set()); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              activeTab === tab.key
+                ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+            }`}
+          >
+            {tab.label}
+            {tab.count > 0 && (
+              <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${
+                activeTab === tab.key
+                  ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400'
+                  : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+              }`}>
+                {tab.count}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
-      {/* Table */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50">
-                {['', 'Employee', 'Working Days', 'Present', 'Absent', 'CL', 'LOP', 'Gross', 'Deduction', 'Net Pay', 'Status', ''].map((h, i) => (
-                  <th key={i} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+      {/* ── TAB: DRAFTS ────────────────────────────────────────────────── */}
+      {activeTab === 'draft' && (
+        <div className="space-y-4">
+
+          {/* Generate section — only visible if some employees have no record */}
+          {employeesWithoutRecord.length > 0 && (
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+              <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+                <div>
+                  <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">Generate Payroll</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                    {employeesWithoutRecord.length} employee(s) without payroll for this period
+                  </p>
+                </div>
+                <button
+                  onClick={handleGenerate}
+                  disabled={generating || selectedEmpIds.size === 0}
+                  className="flex items-center gap-2 h-9 px-4 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  {generating ? <Spinner /> : <i className="ti ti-player-play text-sm" />}
+                  Generate {selectedEmpIds.size > 0 ? `(${selectedEmpIds.size})` : ''}
+                </button>
+              </div>
+
+              {/* Employee multi-select list */}
+              <div className="border border-gray-100 dark:border-gray-700 rounded-lg overflow-hidden">
+                {/* Select all row */}
+                <div
+                  onClick={toggleAllEmps}
+                  className="flex items-center gap-3 px-3 py-2.5 bg-gray-50 dark:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                >
+                  <input
+                    type="checkbox"
+                    checked={employeesWithoutRecord.length > 0 && selectedEmpIds.size === employeesWithoutRecord.length}
+                    onChange={() => {}}
+                    className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 pointer-events-none"
+                  />
+                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Select All</span>
+                </div>
+                {/* Individual employees */}
+                {employeesWithoutRecord.map(emp => (
+                  <div
+                    key={emp.id}
+                    onClick={() => toggleEmpSelect(emp.id)}
+                    className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-gray-50 dark:border-gray-700/50 last:border-0 transition-colors ${
+                      selectedEmpIds.has(emp.id)
+                        ? 'bg-purple-50 dark:bg-purple-900/20'
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedEmpIds.has(emp.id)}
+                      onChange={() => {}}
+                      className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 pointer-events-none"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-200">{emp.full_name}</span>
+                  </div>
                 ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-              {loading ? (
-                <tr><td colSpan={13} className="text-center py-12 text-gray-400 dark:text-gray-500">
-                  <div className="flex items-center justify-center gap-2">{spinnerSVG} Loading...</div>
-                </td></tr>
-              ) : payrollRows.length === 0 ? (
-                <tr><td colSpan={13} className="text-center py-12 text-gray-400 dark:text-gray-500">
-                  No payroll generated for {months[filterMonth - 1]} {filterYear}
-                </td></tr>
-              ) : (
-                payrollRows.map(row => (
-                  <tr key={row.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
-                    <td className="px-4 py-3">
-                      {row.status === 'draft' && (
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(row.id)}
-                          onChange={e => {
-                            setSelectedIds(prev => {
-                              const next = new Set(prev);
-                              e.target.checked ? next.add(row.id) : next.delete(row.id);
-                              return next;
-                            });
-                          }}
-                          className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 accent-purple-600 cursor-pointer"
-                        />
-                      )}
-                    </td>
-                    <td className="px-4 py-3 font-medium text-gray-900 dark:text-white whitespace-nowrap">{row.employee?.full_name ?? '—'}</td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.working_days}</td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.present_days}</td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.absent_days}</td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.cl_days}</td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.lop_days}</td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-300">₹{fmt(row.gross_salary)}</td>
-                    <td className="px-4 py-3 text-red-600 dark:text-red-400">
-                      {row.deduction > 0 ? `−₹${fmt(row.deduction)}` : '—'}
-                    </td>
-                    <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">₹{fmt(row.net_pay)}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${statusColor[row.status]}`}>
-                        {row.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <button onClick={() => generatePayslip(row)}
-                        className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors whitespace-nowrap">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                        Payslip
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-            {payrollRows.length > 0 && (
-              <tfoot>
-                <tr className="border-t-2 border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50">
-                  <td className="px-4 py-3" />
-                  <td className="px-4 py-3 font-semibold text-gray-700 dark:text-gray-200" colSpan={6}>Total</td>
-                  <td className="px-4 py-3 font-semibold text-gray-700 dark:text-gray-200">
-                    ₹{fmt(payrollRows.reduce((s, r) => s + r.gross_salary, 0))}
-                  </td>
-                  <td className="px-4 py-3 font-semibold text-red-600 dark:text-red-400">
-                    −₹{fmt(payrollRows.reduce((s, r) => s + r.deduction, 0))}
-                  </td>
-                  <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">
-                    ₹{fmt(payrollRows.reduce((s, r) => s + r.net_pay, 0))}
-                  </td>
-                  <td /><td />
-                </tr>
-              </tfoot>
-            )}
-          </table>
+              </div>
+            </div>
+          )}
+
+          {/* Draft table */}
+          {loading ? (
+            <div className="flex justify-center py-12"><Spinner /></div>
+          ) : draftRows.length > 0 ? (
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                  {draftRows.length} Draft{draftRows.length !== 1 ? 's' : ''}
+                </p>
+                <ExportButtons rows={draftRows} month={filterMonth} year={filterYear} />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <TableHeader rows={draftRows} />
+                  <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
+                    {draftRows.map(row => <TableRow key={row.id} row={row} />)}
+                  </tbody>
+                  <TableFooter rows={draftRows} colSpan={7} />
+                </table>
+              </div>
+            </div>
+          ) : (
+            <EmptyState icon="ti-file-text" text="No drafts for this period" />
+          )}
         </div>
-      </div>
+      )}
+
+      {/* ── TAB: APPROVED ──────────────────────────────────────────────── */}
+      {activeTab === 'approved' && (
+        <div className="space-y-4">
+          {loading ? (
+            <div className="flex justify-center py-12"><Spinner /></div>
+          ) : approvedRows.length > 0 ? (
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                  {approvedRows.length} Approved
+                </p>
+                <ExportButtons rows={approvedRows} month={filterMonth} year={filterYear} />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <TableHeader rows={approvedRows} />
+                  <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
+                    {approvedRows.map(row => <TableRow key={row.id} row={row} />)}
+                  </tbody>
+                  <TableFooter rows={approvedRows} colSpan={7} />
+                </table>
+              </div>
+            </div>
+          ) : (
+            <EmptyState icon="ti-circle-check" text="No approved payroll for this period" />
+          )}
+        </div>
+      )}
+
+      {/* ── TAB: PAID ──────────────────────────────────────────────────── */}
+      {activeTab === 'paid' && (
+        <div className="space-y-4">
+          {loading ? (
+            <div className="flex justify-center py-12"><Spinner /></div>
+          ) : paidRows.length > 0 ? (
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                  {paidRows.length} Paid
+                </p>
+                <ExportButtons rows={paidRows} month={filterMonth} year={filterYear} />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  {/* Read-only: no checkboxes */}
+                  <thead>
+                    <tr className="bg-gray-50 dark:bg-gray-700/40 border-b border-gray-100 dark:border-gray-700">
+                      {[...COL_HEADERS, 'Payslip'].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
+                    {paidRows.map(row => (
+                      <TableRow key={row.id} row={row} showCheckbox={false} showDelete={false} />
+                    ))}
+                  </tbody>
+                  <TableFooter rows={paidRows} colSpan={6} />
+                </table>
+              </div>
+            </div>
+          ) : (
+            <EmptyState icon="ti-currency-rupee" text="No paid payroll for this period" />
+          )}
+        </div>
+      )}
+
+      {/* ── Floating Action Bar ─────────────────────────────────────────── */}
+      {currentTabSelectedIds.length > 0 && activeTab !== 'paid' && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-gray-900 dark:bg-gray-950 text-white px-5 py-3 rounded-2xl shadow-2xl border border-gray-700 backdrop-blur-sm">
+          <span className="text-sm font-medium text-gray-300">{currentTabSelectedIds.length} selected</span>
+          <div className="w-px h-5 bg-gray-600" />
+
+          {activeTab === 'draft' && (
+            <button
+              onClick={() => handleApprove(currentTabSelectedIds)}
+              className="flex items-center gap-1.5 text-sm font-medium text-emerald-400 hover:text-emerald-300 transition-colors"
+            >
+              <i className="ti ti-circle-check text-base" /> Approve
+            </button>
+          )}
+
+          {activeTab === 'approved' && (
+            <button
+              onClick={() => handleMarkPaid(currentTabSelectedIds)}
+              className="flex items-center gap-1.5 text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              <i className="ti ti-currency-rupee text-base" /> Mark Paid
+            </button>
+          )}
+
+          <div className="w-px h-5 bg-gray-600" />
+
+          <button
+            onClick={() => setDeleteConfirm({
+              ids:   currentTabSelectedIds,
+              label: `${currentTabSelectedIds.length} selected record(s)`,
+            })}
+            className="flex items-center gap-1.5 text-sm font-medium text-red-400 hover:text-red-300 transition-colors"
+          >
+            <i className="ti ti-trash text-base" /> Delete
+          </button>
+
+          <div className="w-px h-5 bg-gray-600" />
+
+          <button onClick={() => setSelectedTableIds(new Set())}
+            className="text-gray-400 hover:text-white transition-colors">
+            <i className="ti ti-x text-sm" />
+          </button>
+        </div>
+      )}
+
+      {/* ── Delete Confirm Dialog ───────────────────────────────────────── */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-xl max-w-sm w-full">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+                <i className="ti ti-alert-triangle text-red-600 dark:text-red-400 text-lg" />
+              </div>
+              <h3 className="font-semibold text-gray-900 dark:text-white text-base">Confirm Delete</h3>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-5">
+              Permanently delete <strong className="text-gray-900 dark:text-white">{deleteConfirm.label}</strong>?
+              This cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="flex-1 px-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDelete(deleteConfirm.ids)}
+                disabled={deleting}
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                {deleting && <Spinner />} Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
