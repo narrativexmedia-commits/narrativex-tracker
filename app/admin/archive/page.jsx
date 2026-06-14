@@ -53,16 +53,16 @@ export default function ArchivePage() {
           .order("date", { ascending: true }),
         supabase
           .from("agent_logs")
-          .select("*, profiles!agent_logs_employee_id_fkey(full_name)")
-          .gte("created_at", `${fromDate}T00:00:00`)
-          .lte("created_at", `${toDate}T23:59:59`)
-          .order("created_at", { ascending: true }),
+          .select("*, profiles(full_name)")
+          .gte("ts", `${fromDate}T00:00:00`)
+          .lte("ts", `${toDate}T23:59:59`)
+          .order("ts", { ascending: true }),
         supabase
           .from("activity_flags")
           .select("*, profiles!activity_flags_employee_id_fkey(full_name)")
-          .gte("created_at", `${fromDate}T00:00:00`)
-          .lte("created_at", `${toDate}T23:59:59`)
-          .order("created_at", { ascending: true }),
+          .gte("ts", `${fromDate}T00:00:00`)
+          .lte("ts", `${toDate}T23:59:59`)
+          .order("ts", { ascending: true }),
       ]);
 
       if (attendanceRes.error) throw attendanceRes.error;
@@ -80,7 +80,7 @@ export default function ArchivePage() {
       }));
 
       const agentLogs = (agentLogsRes.data || []).map((r) => ({
-        Timestamp: r.created_at,
+        Timestamp: r.ts,
         Employee: r.profiles?.full_name ?? r.employee_id,
         "Mouse Events": r.mouse_events ?? 0,
         "Keyboard Events": r.keyboard_events ?? 0,
@@ -134,7 +134,7 @@ export default function ArchivePage() {
     try {
       const [a, b, c] = await Promise.all([
         supabase.from("attendance").delete().gte("date", fromDate).lte("date", toDate),
-        supabase.from("agent_logs").delete().gte("created_at", `${fromDate}T00:00:00`).lte("created_at", `${toDate}T23:59:59`),
+        supabase.from("agent_logs").delete().gte("ts", `${fromDate}T00:00:00`).lte("ts", `${toDate}T23:59:59`),
         supabase.from("activity_flags").delete().gte("created_at", `${fromDate}T00:00:00`).lte("created_at", `${toDate}T23:59:59`),
       ]);
 
