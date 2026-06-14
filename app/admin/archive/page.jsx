@@ -60,9 +60,9 @@ export default function ArchivePage() {
         supabase
           .from("activity_flags")
           .select("*, profiles!activity_flags_employee_id_fkey(full_name)")
-          .gte("ts", `${fromDate}T00:00:00`)
-          .lte("ts", `${toDate}T23:59:59`)
-          .order("ts", { ascending: true }),
+          .gte("created_at", `${fromDate}T00:00:00`)
+          .lte("created_at", `${toDate}T23:59:59`)
+          .order("created_at", { ascending: true }),
       ]);
 
       if (attendanceRes.error) throw attendanceRes.error;
