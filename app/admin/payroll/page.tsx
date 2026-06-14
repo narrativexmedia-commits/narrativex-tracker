@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -222,8 +222,22 @@ export default function PayrollPage() {
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ ids: string[]; label: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // ── NEW: dropdown open state ──────────────────────────────────────────────
+  const [empDropdownOpen, setEmpDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const years = [currentYear - 1, currentYear, currentYear + 1];
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setEmpDropdownOpen(false);
+      }
+    }
+    if (empDropdownOpen) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [empDropdownOpen]);
 
   // ─── Derived state ────────────────────────────────────────────────────────
   const draftRows    = useMemo(() => allPayrollRows.filter(r => r.status === 'draft'),    [allPayrollRows]);
@@ -269,6 +283,7 @@ export default function PayrollPage() {
     }
     setMessage(null);
     setGenerating(true);
+    setEmpDropdownOpen(false);
 
     const empIds = [...selectedEmpIds];
     const empsToProcess = activeEmployees.filter(e => empIds.includes(e.id));
@@ -569,41 +584,66 @@ export default function PayrollPage() {
                 </button>
               </div>
 
-              {/* Employee multi-select list */}
-              <div className="border border-gray-100 dark:border-gray-700 rounded-lg overflow-hidden">
-                {/* Select all row */}
-                <div
-                  onClick={toggleAllEmps}
-                  className="flex items-center gap-3 px-3 py-2.5 bg-gray-50 dark:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              {/* ── Employee dropdown (replaces checkbox list) ── */}
+              <div className="relative" ref={dropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setEmpDropdownOpen(prev => !prev)}
+                  className={`flex items-center justify-between w-full h-10 px-3 rounded-lg border text-sm transition-colors ${
+                    empDropdownOpen
+                      ? 'border-purple-500 ring-2 ring-purple-500/20 bg-white dark:bg-gray-700'
+                      : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-500'
+                  } text-gray-700 dark:text-gray-200`}
                 >
-                  <input
-                    type="checkbox"
-                    checked={employeesWithoutRecord.length > 0 && selectedEmpIds.size === employeesWithoutRecord.length}
-                    onChange={() => {}}
-                    className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 pointer-events-none"
-                  />
-                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Select All</span>
-                </div>
-                {/* Individual employees */}
-                {employeesWithoutRecord.map(emp => (
-                  <div
-                    key={emp.id}
-                    onClick={() => toggleEmpSelect(emp.id)}
-                    className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-gray-50 dark:border-gray-700/50 last:border-0 transition-colors ${
-                      selectedEmpIds.has(emp.id)
-                        ? 'bg-purple-50 dark:bg-purple-900/20'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedEmpIds.has(emp.id)}
-                      onChange={() => {}}
-                      className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 pointer-events-none"
-                    />
-                    <span className="text-sm text-gray-700 dark:text-gray-200">{emp.full_name}</span>
+                  <span className={selectedEmpIds.size === 0 ? 'text-gray-400 dark:text-gray-500' : ''}>
+                    {selectedEmpIds.size === 0
+                      ? 'Select employees…'
+                      : selectedEmpIds.size === employeesWithoutRecord.length
+                        ? 'All employees selected'
+                        : `${selectedEmpIds.size} of ${employeesWithoutRecord.length} selected`}
+                  </span>
+                  <i className={`ti ${empDropdownOpen ? 'ti-chevron-up' : 'ti-chevron-down'} text-gray-400 text-sm`} />
+                </button>
+
+                {empDropdownOpen && (
+                  <div className="absolute left-0 right-0 top-11 z-30 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden">
+                    {/* Select all row */}
+                    <div
+                      onClick={toggleAllEmps}
+                      className="flex items-center gap-3 px-3 py-2.5 bg-gray-50 dark:bg-gray-700/60 border-b border-gray-100 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={employeesWithoutRecord.length > 0 && selectedEmpIds.size === employeesWithoutRecord.length}
+                        onChange={() => {}}
+                        className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 pointer-events-none"
+                      />
+                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Select All</span>
+                    </div>
+                    {/* Scrollable employee list */}
+                    <div className="max-h-52 overflow-y-auto">
+                      {employeesWithoutRecord.map(emp => (
+                        <div
+                          key={emp.id}
+                          onClick={() => toggleEmpSelect(emp.id)}
+                          className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-gray-50 dark:border-gray-700/40 last:border-0 transition-colors ${
+                            selectedEmpIds.has(emp.id)
+                              ? 'bg-purple-50 dark:bg-purple-900/20'
+                              : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedEmpIds.has(emp.id)}
+                            onChange={() => {}}
+                            className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 pointer-events-none"
+                          />
+                          <span className="text-sm text-gray-700 dark:text-gray-200">{emp.full_name}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
+                )}
               </div>
             </div>
           )}
@@ -679,7 +719,6 @@ export default function PayrollPage() {
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  {/* Read-only: no checkboxes */}
                   <thead>
                     <tr className="bg-gray-50 dark:bg-gray-700/40 border-b border-gray-100 dark:border-gray-700">
                       {[...COL_HEADERS, 'Payslip'].map(h => (
