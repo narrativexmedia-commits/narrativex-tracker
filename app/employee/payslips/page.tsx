@@ -19,14 +19,24 @@ type Payroll = {
   absent_days: number;
   cl_days: number;
   lop_days: number;
+  worked_hours: number;
+  expected_hours: number;
   gross_salary: number;
   deduction: number;
   net_pay: number;
   status: "approved" | "paid";
 };
 
+function fmtHrs(h: number) {
+  const hrs = Math.floor(h);
+  const mins = Math.round((h - hrs) * 60);
+  return `${hrs}h ${mins}m`;
+}
+
 function generatePDF(payroll: Payroll, employeeName: string, department: string) {
-  const perDay = (payroll.gross_salary / payroll.working_days).toFixed(2);
+  const hourlyRate = payroll.expected_hours > 0
+    ? (payroll.gross_salary / payroll.expected_hours).toFixed(2)
+    : "0.00";
   const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -45,6 +55,7 @@ table{width:100%;border-collapse:collapse;}
 tr{border-bottom:1px solid #f0f0f0;}
 td{padding:10px 12px;font-size:13px;}
 td:last-child{text-align:right;font-weight:500;}
+.section-header td{background:#f8f7ff;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#7c3aed;padding:8px 12px;}
 .net td{background:#f5f0ff;font-weight:700;font-size:14px;color:#7c3aed;border-bottom:none;}
 .badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600;}
 .footer{margin-top:32px;font-size:11px;color:#aaa;text-align:center;}
@@ -65,14 +76,19 @@ td:last-child{text-align:right;font-weight:500;}
   </div></div>
 </div>
 <table>
-  <tr><td>Gross Salary</td><td>&#8377;${payroll.gross_salary.toLocaleString("en-IN")}</td></tr>
+  <tr class="section-header"><td colspan="2">Attendance</td></tr>
   <tr><td>Working Days</td><td>${payroll.working_days}</td></tr>
   <tr><td>Present Days</td><td>${payroll.present_days}</td></tr>
   <tr><td>Absent Days</td><td>${payroll.absent_days}</td></tr>
   <tr><td>CL Days Used</td><td>${payroll.cl_days}</td></tr>
   <tr><td>LOP Days</td><td>${payroll.lop_days}</td></tr>
-  <tr><td>Per Day Rate</td><td>&#8377;${perDay}</td></tr>
-  <tr><td>Deduction</td><td>&#8377;${payroll.deduction.toLocaleString("en-IN")}</td></tr>
+  <tr class="section-header"><td colspan="2">Hours</td></tr>
+  <tr><td>Expected Hours</td><td>${fmtHrs(payroll.expected_hours ?? 0)}</td></tr>
+  <tr><td>Worked Hours</td><td>${fmtHrs(payroll.worked_hours ?? 0)}</td></tr>
+  <tr class="section-header"><td colspan="2">Earnings</td></tr>
+  <tr><td>Gross Salary</td><td>&#8377;${payroll.gross_salary.toLocaleString("en-IN")}</td></tr>
+  <tr><td>Hourly Rate</td><td>&#8377;${hourlyRate}/hr</td></tr>
+  <tr><td>Deduction (LOP)</td><td>&#8377;${payroll.deduction.toLocaleString("en-IN")}</td></tr>
   <tr class="net"><td>Net Pay</td><td>&#8377;${payroll.net_pay.toLocaleString("en-IN")}</td></tr>
 </table>
 <div class="footer">Generated on ${new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })} · NarrativeX Media</div>
@@ -126,24 +142,49 @@ export default function PayslipsPage() {
         <div className="space-y-3">
           {payrolls.map(p => (
             <div key={p.id} className="bg-[#12122a] border border-white/[0.08] rounded-xl px-5 py-4 flex items-center gap-4">
+              {/* Month badge */}
               <div className="w-12 h-12 rounded-lg bg-purple-600/20 flex flex-col items-center justify-center flex-shrink-0">
                 <span className="text-[10px] text-purple-400 font-medium">{MONTHS[p.month - 1].slice(0, 3).toUpperCase()}</span>
                 <span className="text-xs text-purple-300 font-bold">{p.year}</span>
               </div>
+
+              {/* Details */}
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-white">{MONTHS[p.month - 1]} {p.year}</div>
                 <div className="text-xs text-white/40 mt-0.5">
-                  {p.present_days}d present · {p.lop_days}d LOP · &#8377;{p.deduction.toLocaleString("en-IN")} deducted
+                  {p.present_days}d present · {fmtHrs(p.worked_hours ?? 0)} worked
+                  {p.lop_days > 0 && ` · ${p.lop_days}d LOP`}
                 </div>
+                {/* Hours progress bar */}
+                {(p.expected_hours ?? 0) > 0 && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <div className="flex-1 h-1 bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-purple-500 rounded-full"
+                        style={{ width: `${Math.min((p.worked_hours / p.expected_hours) * 100, 100).toFixed(1)}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] text-white/30 whitespace-nowrap">
+                      {((p.worked_hours / p.expected_hours) * 100).toFixed(0)}% of {fmtHrs(p.expected_hours)}
+                    </span>
+                  </div>
+                )}
               </div>
+
+              {/* Net pay + status */}
               <div className="text-right flex-shrink-0">
                 <div className="text-sm font-semibold text-white">&#8377;{p.net_pay.toLocaleString("en-IN")}</div>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                {p.deduction > 0 && (
+                  <div className="text-[10px] text-red-400 mt-0.5">−&#8377;{p.deduction.toLocaleString("en-IN")}</div>
+                )}
+                <span className={`text-xs px-2 py-0.5 rounded-full mt-1 inline-block ${
                   p.status === "paid" ? "bg-green-500/20 text-green-400" : "bg-purple-500/20 text-purple-400"
                 }`}>
                   {p.status === "paid" ? "Paid" : "Approved"}
                 </span>
               </div>
+
+              {/* PDF button */}
               <button
                 onClick={() => generatePDF(p, employee?.full_name ?? "", employee?.department ?? "")}
                 className="flex-shrink-0 flex items-center gap-1.5 text-xs text-white/40 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] px-3 py-2 rounded-lg transition-colors"

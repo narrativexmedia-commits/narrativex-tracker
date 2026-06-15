@@ -11,6 +11,8 @@ const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+const DAILY_HOURS = 7.25; // 9:30–18:00 minus 1h15m break
+
 type PayrollRow = {
   id: string;
   employee_id: string;
@@ -21,6 +23,8 @@ type PayrollRow = {
   absent_days: number;
   cl_days: number;
   lop_days: number;
+  worked_hours: number;
+  expected_hours: number;
   gross_salary: number;
   deduction: number;
   net_pay: number;
@@ -53,11 +57,18 @@ function fmt(n: number) {
   }).format(n);
 }
 
+function fmtHrs(h: number) {
+  const hrs = Math.floor(h);
+  const mins = Math.round((h - hrs) * 60);
+  return `${hrs}h ${mins}m`;
+}
+
 function exportCSV(rows: PayrollRow[], month: number, year: number) {
-  const headers = ['Employee','Working Days','Present','Absent','CL','LOP','Gross','Deduction','Net Pay','Status'];
+  const headers = ['Employee','Working Days','Present','Absent','CL','LOP','Worked Hrs','Expected Hrs','Gross','Deduction','Net Pay','Status'];
   const data = rows.map(r => [
     r.employee?.full_name ?? '',
     r.working_days, r.present_days, r.absent_days, r.cl_days, r.lop_days,
+    r.worked_hours?.toFixed(2) ?? 0, r.expected_hours?.toFixed(2) ?? 0,
     r.gross_salary, r.deduction, r.net_pay, r.status,
   ]);
   const csv = [headers, ...data].map(row => row.join(',')).join('\n');
@@ -71,14 +82,15 @@ function exportCSV(rows: PayrollRow[], month: number, year: number) {
 }
 
 function exportExcel(rows: PayrollRow[], month: number, year: number) {
-  const headers = ['Employee','Working Days','Present','Absent','CL','LOP','Gross (₹)','Deduction (₹)','Net Pay (₹)','Status'];
+  const headers = ['Employee','Working Days','Present','Absent','CL','LOP','Worked Hrs','Expected Hrs','Gross (₹)','Deduction (₹)','Net Pay (₹)','Status'];
   const data = rows.map(r => [
     r.employee?.full_name ?? '',
     r.working_days, r.present_days, r.absent_days, r.cl_days, r.lop_days,
+    r.worked_hours?.toFixed(2) ?? 0, r.expected_hours?.toFixed(2) ?? 0,
     r.gross_salary, r.deduction, r.net_pay, r.status,
   ]);
   const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
-  ws['!cols'] = [20, 14, 10, 10, 8, 8, 14, 14, 14, 10].map(w => ({ wch: w }));
+  ws['!cols'] = [20, 14, 10, 10, 8, 8, 12, 12, 14, 14, 14, 10].map(w => ({ wch: w }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, `${months[month - 1]} ${year}`);
   XLSX.writeFile(wb, `payroll-${months[month - 1]}-${year}.xlsx`);
@@ -92,29 +104,32 @@ function exportPDF(rows: PayrollRow[], month: number, year: number) {
   doc.text(`Generated: ${new Date().toLocaleDateString('en-IN')}`, 14, 23);
   autoTable(doc, {
     startY: 28,
-    head: [['Employee','Working Days','Present','Absent','CL','LOP','Gross (₹)','Deduction (₹)','Net Pay (₹)','Status']],
+    head: [['Employee','Working Days','Present','Absent','CL','LOP','Worked Hrs','Expected Hrs','Gross (₹)','Deduction (₹)','Net Pay (₹)','Status']],
     body: rows.map(r => [
       r.employee?.full_name ?? '',
       r.working_days, r.present_days, r.absent_days, r.cl_days, r.lop_days,
+      fmtHrs(r.worked_hours ?? 0), fmtHrs(r.expected_hours ?? 0),
       fmt(r.gross_salary), fmt(r.deduction), fmt(r.net_pay), r.status,
     ]),
     foot: [[
-      'Total','','','','','',
+      'Total','','','','','','','',
       fmt(rows.reduce((s, r) => s + r.gross_salary, 0)),
       fmt(rows.reduce((s, r) => s + r.deduction, 0)),
       fmt(rows.reduce((s, r) => s + r.net_pay, 0)),
       '',
     ]],
-    headStyles: { fillColor: [30, 30, 60], textColor: 255, fontSize: 9 },
-    footStyles: { fillColor: [240, 240, 240], textColor: 30, fontStyle: 'bold', fontSize: 9 },
-    bodyStyles: { fontSize: 9 },
+    headStyles: { fillColor: [30, 30, 60], textColor: 255, fontSize: 8 },
+    footStyles: { fillColor: [240, 240, 240], textColor: 30, fontStyle: 'bold', fontSize: 8 },
+    bodyStyles: { fontSize: 8 },
     alternateRowStyles: { fillColor: [248, 248, 255] },
   });
   doc.save(`payroll-${months[month - 1]}-${year}.pdf`);
 }
 
 function generatePayslip(row: PayrollRow) {
-  const perDay = (row.gross_salary / row.working_days).toFixed(2);
+  const hourlyRate = row.expected_hours > 0
+    ? (row.gross_salary / row.expected_hours).toFixed(2)
+    : '0.00';
   const monthName = months[row.month - 1];
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/>
@@ -152,11 +167,13 @@ td:last-child{text-align:right;font-weight:500;}
 <table>
   <tr><td>Gross Salary</td><td>&#8377;${fmt(row.gross_salary)}</td></tr>
   <tr><td>Working Days</td><td>${row.working_days}</td></tr>
+  <tr><td>Expected Hours</td><td>${fmtHrs(row.expected_hours ?? 0)}</td></tr>
+  <tr><td>Hourly Rate</td><td>&#8377;${hourlyRate}/hr</td></tr>
   <tr><td>Present Days</td><td>${row.present_days}</td></tr>
+  <tr><td>Worked Hours</td><td>${fmtHrs(row.worked_hours ?? 0)}</td></tr>
   <tr><td>Absent Days</td><td>${row.absent_days}</td></tr>
   <tr><td>CL Days Used</td><td>${row.cl_days}</td></tr>
   <tr><td>LOP Days</td><td>${row.lop_days}</td></tr>
-  <tr><td>Per Day Rate</td><td>&#8377;${perDay}</td></tr>
   <tr><td>Deduction</td><td>&#8377;${fmt(row.deduction)}</td></tr>
   <tr class="net"><td>Net Pay</td><td>&#8377;${fmt(row.net_pay)}</td></tr>
 </table>
@@ -222,13 +239,11 @@ export default function PayrollPage() {
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ ids: string[]; label: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
-  // ── NEW: dropdown open state ──────────────────────────────────────────────
   const [empDropdownOpen, setEmpDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const years = [currentYear - 1, currentYear, currentYear + 1];
 
-  // Close dropdown on outside click
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -275,7 +290,7 @@ export default function PayrollPage() {
 
   useEffect(() => { fetchPayroll(); }, [fetchPayroll]);
 
-  // ─── Actions ──────────────────────────────────────────────────────────────
+  // ─── Generate payroll (hourly) ────────────────────────────────────────────
   async function handleGenerate() {
     if (selectedEmpIds.size === 0) {
       setMessage({ type: 'error', text: 'Select at least one employee to generate payroll.' });
@@ -300,38 +315,58 @@ export default function PayrollPage() {
 
     const holidayDates  = (holidays ?? []).map(h => h.date);
     const daysToPayFor  = getWorkingDays(filterYear, filterMonth, holidayDates);
+    const expectedHours = parseFloat((daysToPayFor * DAILY_HOURS).toFixed(2));
 
     const records = await Promise.all(empsToProcess.map(async (emp) => {
       const { data: attRows } = await supabase
-        .from('attendance').select('date, status')
+        .from('attendance')
+        .select('date, status, clock_in, clock_out')
         .eq('employee_id', emp.id)
         .gte('date', `${filterYear}-${monthStr}-01`)
         .lt('date', `${nextYear}-${nextMonthStr}-01`);
 
-      const att         = attRows ?? [];
-      const presentDays = att.filter(a => a.status === 'present' || a.status === 'late').length;
-      const absentDays  = att.filter(a => a.status === 'absent').length;
-      const clDays      = Math.min(2, absentDays);
-      const lopDays     = Math.max(0, absentDays - clDays);
+      const att = attRows ?? [];
 
-      const perDay    = emp.salary > 0 ? emp.salary / daysToPayFor : 0;
-      const earnedPay = parseFloat((perDay * daysToPayFor).toFixed(2));
-      const deduction = parseFloat((perDay * lopDays).toFixed(2));
-      const netPay    = parseFloat((earnedPay - deduction).toFixed(2));
+      // ── Hourly calculation ──────────────────────────────────────────────
+      let workedHours = 0;
+      let presentDays = 0;
+
+      for (const a of att) {
+        if (!a.clock_in || !a.clock_out) continue; // skip — no checkout
+        const diffMs  = new Date(a.clock_out).getTime() - new Date(a.clock_in).getTime();
+        const diffHrs = diffMs / (1000 * 60 * 60);
+        if (diffHrs <= 0) continue;
+        workedHours += Math.min(diffHrs, DAILY_HOURS); // cap at 7.25h/day
+        presentDays++;
+      }
+
+      workedHours = parseFloat(workedHours.toFixed(4));
+
+      const absentDays = daysToPayFor - presentDays;
+      const clDays     = Math.min(2, absentDays);
+      const lopDays    = Math.max(0, absentDays - clDays);
+
+      // CL days are paid at full daily rate
+      const paidHours  = workedHours + clDays * DAILY_HOURS;
+      const hourlyRate = emp.salary > 0 ? emp.salary / expectedHours : 0;
+      const netPay     = parseFloat(Math.min(paidHours * hourlyRate, emp.salary).toFixed(2));
+      const deduction  = parseFloat((emp.salary - netPay).toFixed(2));
 
       return {
-        employee_id:  emp.id,
-        month:        filterMonth,
-        year:         filterYear,
-        working_days: daysToPayFor,
-        present_days: presentDays,
-        absent_days:  absentDays,
-        cl_days:      clDays,
-        lop_days:     lopDays,
-        gross_salary: emp.salary,
+        employee_id:    emp.id,
+        month:          filterMonth,
+        year:           filterYear,
+        working_days:   daysToPayFor,
+        present_days:   presentDays,
+        absent_days:    absentDays,
+        cl_days:        clDays,
+        lop_days:       lopDays,
+        worked_hours:   workedHours,
+        expected_hours: expectedHours,
+        gross_salary:   emp.salary,
         deduction,
-        net_pay:      netPay,
-        status:       'draft',
+        net_pay:        netPay,
+        status:         'draft',
       };
     }));
 
@@ -404,8 +439,9 @@ export default function PayrollPage() {
     else setSelectedEmpIds(new Set(employeesWithoutRecord.map(e => e.id)));
   }
 
-  // ─── Shared table columns ─────────────────────────────────────────────────
-  const COL_HEADERS = ['Employee','Working Days','Present','Absent','CL','LOP','Gross','Deduction','Net Pay'];
+  // ─── Table components ─────────────────────────────────────────────────────
+  // colSpan for "Total" label = checkbox(1) + employee + working_days + present + absent + cl + lop + worked_hrs + expected_hrs = 9
+  const COL_HEADERS = ['Employee','Working Days','Present','Absent','CL','LOP','Worked Hrs','Expected Hrs','Gross','Deduction','Net Pay'];
 
   function TableHeader({ rows, showCheckbox = true }: { rows: PayrollRow[]; showCheckbox?: boolean }) {
     return (
@@ -446,6 +482,8 @@ export default function PayrollPage() {
         <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.absent_days}</td>
         <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.cl_days}</td>
         <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.lop_days}</td>
+        <td className="px-4 py-3 text-blue-600 dark:text-blue-400 font-medium whitespace-nowrap">{fmtHrs(row.worked_hours ?? 0)}</td>
+        <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap">{fmtHrs(row.expected_hours ?? 0)}</td>
         <td className="px-4 py-3 text-gray-900 dark:text-white font-medium whitespace-nowrap">₹{fmt(row.gross_salary)}</td>
         <td className="px-4 py-3 text-red-600 dark:text-red-400 font-medium whitespace-nowrap">−₹{fmt(row.deduction)}</td>
         <td className="px-4 py-3 text-gray-900 dark:text-white font-semibold whitespace-nowrap">₹{fmt(row.net_pay)}</td>
@@ -469,6 +507,7 @@ export default function PayrollPage() {
     );
   }
 
+  // colSpan: with checkbox = 9, without checkbox = 8
   function TableFooter({ rows, colSpan }: { rows: PayrollRow[]; colSpan: number }) {
     return (
       <tfoot>
@@ -563,15 +602,13 @@ export default function PayrollPage() {
       {/* ── TAB: DRAFTS ────────────────────────────────────────────────── */}
       {activeTab === 'draft' && (
         <div className="space-y-4">
-
-          {/* Generate section — only visible if some employees have no record */}
           {employeesWithoutRecord.length > 0 && (
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
               <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
                 <div>
                   <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">Generate Payroll</p>
                   <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                    {employeesWithoutRecord.length} employee(s) without payroll for this period
+                    {employeesWithoutRecord.length} employee(s) without payroll for this period · Hourly basis (7.25h/day)
                   </p>
                 </div>
                 <button
@@ -584,7 +621,6 @@ export default function PayrollPage() {
                 </button>
               </div>
 
-              {/* ── Employee dropdown (replaces checkbox list) ── */}
               <div className="relative" ref={dropdownRef}>
                 <button
                   type="button"
@@ -607,7 +643,6 @@ export default function PayrollPage() {
 
                 {empDropdownOpen && (
                   <div className="absolute left-0 right-0 top-11 z-30 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden">
-                    {/* Select all row */}
                     <div
                       onClick={toggleAllEmps}
                       className="flex items-center gap-3 px-3 py-2.5 bg-gray-50 dark:bg-gray-700/60 border-b border-gray-100 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
@@ -620,7 +655,6 @@ export default function PayrollPage() {
                       />
                       <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Select All</span>
                     </div>
-                    {/* Scrollable employee list */}
                     <div className="max-h-52 overflow-y-auto">
                       {employeesWithoutRecord.map(emp => (
                         <div
@@ -648,7 +682,6 @@ export default function PayrollPage() {
             </div>
           )}
 
-          {/* Draft table */}
           {loading ? (
             <div className="flex justify-center py-12"><Spinner /></div>
           ) : draftRows.length > 0 ? (
@@ -665,7 +698,7 @@ export default function PayrollPage() {
                   <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
                     {draftRows.map(row => <TableRow key={row.id} row={row} />)}
                   </tbody>
-                  <TableFooter rows={draftRows} colSpan={7} />
+                  <TableFooter rows={draftRows} colSpan={9} />
                 </table>
               </div>
             </div>
@@ -694,7 +727,7 @@ export default function PayrollPage() {
                   <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
                     {approvedRows.map(row => <TableRow key={row.id} row={row} />)}
                   </tbody>
-                  <TableFooter rows={approvedRows} colSpan={7} />
+                  <TableFooter rows={approvedRows} colSpan={9} />
                 </table>
               </div>
             </div>
@@ -731,7 +764,7 @@ export default function PayrollPage() {
                       <TableRow key={row.id} row={row} showCheckbox={false} showDelete={false} />
                     ))}
                   </tbody>
-                  <TableFooter rows={paidRows} colSpan={6} />
+                  <TableFooter rows={paidRows} colSpan={8} />
                 </table>
               </div>
             </div>
